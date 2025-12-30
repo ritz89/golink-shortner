@@ -1,0 +1,266 @@
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h1 class="text-3xl font-bold text-gray-900">Manage Links</h1>
+        <button onclick="openCreateModal()" 
+                class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">
+            Create Link
+        </button>
+    </div>
+
+    <!-- Search Box -->
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="flex items-center space-x-4">
+            <input 
+                type="text" 
+                id="searchInput" 
+                placeholder="Search by code or URL..."
+                class="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                onkeyup="handleSearch(event)"
+            >
+            <button 
+                onclick="clearSearch()"
+                class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                id="clearSearchBtn"
+                style="display: none;"
+            >
+                Clear
+            </button>
+        </div>
+    </div>
+    
+    <div class="bg-white rounded-lg shadow">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">Links</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Original URL</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Short URL</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="linksTable" class="bg-white divide-y divide-gray-200">
+                    <tr>
+                        <td colspan="5" class="px-6 py-4 text-center text-sm text-gray-500">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Create/Edit Modal -->
+<div id="linkModal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+    <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+        <div class="mt-3">
+            <h3 id="modalTitle" class="text-lg font-medium text-gray-900 mb-4">Create Link</h3>
+            <form id="linkForm">
+                <input type="hidden" id="linkCode" name="code">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Code (optional)</label>
+                    <input type="text" id="codeInput" name="code" 
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Original URL *</label>
+                    <input type="url" id="originalUrlInput" name="original_url" required
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="closeModal()" 
+                            class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50">
+                        Cancel
+                    </button>
+                    <button type="submit" 
+                            class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">
+                        Save
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentEditCode = null;
+let currentSearch = '';
+const baseURL = window.location.origin;
+let searchTimeout = null;
+let linksData = [];
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function editLink(code) {
+    currentEditCode = code;
+    document.getElementById('modalTitle').textContent = 'Edit Link';
+    document.getElementById('codeInput').disabled = true;
+    document.getElementById('codeInput').value = code;
+    
+    // Find link in already loaded data
+    const link = linksData ? linksData.find(l => l.code === code) : null;
+    if (link) {
+        document.getElementById('originalUrlInput').value = link.original_url;
+        document.getElementById('linkModal').classList.remove('hidden');
+    } else {
+        // If not found in current data, fetch it
+        fetch(`/api/v1/admin/links?search=${encodeURIComponent(code)}&limit=100`)
+            .then(r => r.json())
+            .then(result => {
+                if (result.success && result.data && result.data.length > 0) {
+                    const foundLink = result.data.find(l => l.code === code);
+                    if (foundLink) {
+                        document.getElementById('originalUrlInput').value = foundLink.original_url;
+                        document.getElementById('linkModal').classList.remove('hidden');
+                    } else {
+                        alert('Link not found');
+                    }
+                } else {
+                    alert('Failed to load link data');
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching link:', error);
+                alert('Error loading link data');
+            });
+    }
+}
+
+async function deleteLink(code) {
+    if (!confirm('Are you sure you want to delete this link?')) return;
+    
+    const response = await fetch(`/api/v1/admin/links/${encodeURIComponent(code)}`, { method: 'DELETE' });
+    const result = await response.json();
+    
+    if (result.success) {
+        loadLinks();
+    } else {
+        alert('Failed to delete link');
+    }
+}
+
+function openCreateModal() {
+    currentEditCode = null;
+    document.getElementById('modalTitle').textContent = 'Create Link';
+    document.getElementById('linkForm').reset();
+    document.getElementById('codeInput').disabled = false;
+    document.getElementById('linkModal').classList.remove('hidden');
+}
+
+function closeModal() {
+    document.getElementById('linkModal').classList.add('hidden');
+    currentEditCode = null;
+}
+
+function handleSearch(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+    }
+    
+    if (searchTimeout) {
+        clearTimeout(searchTimeout);
+    }
+    searchTimeout = setTimeout(() => {
+        currentSearch = document.getElementById('searchInput').value.trim();
+        const clearBtn = document.getElementById('clearSearchBtn');
+        if (currentSearch) {
+            clearBtn.style.display = 'block';
+        } else {
+            clearBtn.style.display = 'none';
+        }
+        loadLinks();
+    }, 300);
+}
+
+function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    currentSearch = '';
+    document.getElementById('clearSearchBtn').style.display = 'none';
+    loadLinks();
+}
+
+async function loadLinks() {
+    const response = await fetch('/api/v1/admin/links' + (currentSearch ? '?search=' + encodeURIComponent(currentSearch) : ''));
+    const result = await response.json();
+    
+    const tbody = document.getElementById('linksTable');
+    if (result.data && result.data.length > 0) {
+        linksData = result.data;
+        tbody.innerHTML = result.data.map(link => {
+            // Determine source label and styling
+            let source = 'Web UI';
+            let sourceClass = 'bg-gray-100 text-gray-800';
+            
+            if (link.is_api_generated === true || link.is_api_generated === 'true') {
+                sourceClass = 'bg-blue-100 text-blue-800';
+                if (link.api_token && link.api_token.name) {
+                    source = link.api_token.name;
+                } else {
+                    source = 'API (Unknown)';
+                }
+            }
+            
+            const codeEscaped = escapeHtml(link.code || '');
+            const originalUrlEscaped = escapeHtml(link.original_url || '');
+            const sourceEscaped = escapeHtml(source);
+            
+            return `
+                <tr>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${codeEscaped}</td>
+                    <td class="px-6 py-4 text-sm text-gray-500 truncate max-w-xs" title="${originalUrlEscaped}">${originalUrlEscaped}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-blue-600">
+                        <a href="${baseURL}/${link.code}" target="_blank" class="hover:underline">${baseURL}/${link.code}</a>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <span class="px-2 py-1 text-xs rounded-full ${sourceClass}">${sourceEscaped}</span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">
+                        <button onclick="editLink('${String(link.code).replace(/'/g, "\\'")}')" class="text-indigo-600 hover:text-indigo-900 mr-3">Edit</button>
+                        <button onclick="deleteLink('${String(link.code).replace(/'/g, "\\'")}')" class="text-red-600 hover:text-red-900">Delete</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    } else {
+        linksData = [];
+        tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center text-sm text-gray-500">No links found</td></tr>';
+    }
+}
+
+document.getElementById('linkForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const data = Object.fromEntries(formData);
+    
+    if (!data.code) delete data.code;
+    
+    const url = currentEditCode 
+        ? `/api/v1/admin/links/${encodeURIComponent(currentEditCode)}`
+        : '/api/v1/admin/links';
+    const method = currentEditCode ? 'PUT' : 'POST';
+    
+    const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    
+    const result = await response.json();
+    if (result.success) {
+        closeModal();
+        loadLinks();
+    } else {
+        alert(result.error || 'Failed to save link');
+    }
+});
+
+loadLinks();
+</script>

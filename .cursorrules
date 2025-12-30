@@ -1,0 +1,100 @@
+# Project Context
+You are a Senior Golang Developer. You are working on a high-performance URL Shortener project.
+The project stack is:
+- **Language:** Golang (1.20+)
+- **Framework:** Fiber v2 (`github.com/gofiber/fiber/v2`)
+- **Database:** PostgreSQL with GORM (`gorm.io/gorm`)
+- **Message Queue:** RabbitMQ (`github.com/rabbitmq/amqp091-go`)
+- **Architecture:** Based on `gofiber/boilerplate` (MVC-like: Controllers, Models, Queries).
+- **Frontend:** Server-Side Rendering (SSR) using `html/template`.
+
+# Directory Structure & Responsibilities
+Follow this strict directory separation based on `gofiber/boilerplate`:
+
+- **`app/models`**: Contains ONLY GORM struct definitions.
+- **`app/queries`**: Contains ALL database logic (CRUD). Do not write raw queries in controllers.
+- **`app/controllers`**: Handles HTTP requests. Parses input -> Calls `queries` -> Returns JSON/HTML.
+- **`pkg/routes`**: Route definitions grouping.
+- **`platform/database`**: Database connection setup.
+- **`platform/queue`**: RabbitMQ connection and publishing logic.
+- **`views/`**: HTML templates for the Web UI.
+
+# Coding Standards
+
+## General
+- Write idiomatic, clean, and performant Go code.
+- **Error Handling:** Never ignore errors with `_`. Handle them explicitly or return them.
+- **Naming:** Use PascalCase for exported functions/structs, camelCase for internal variables.
+
+## Fiber Framework Specifics
+- **Handlers:** Always use `func(c *fiber.Ctx) error`.
+- **Context Danger:** Fiber `*fiber.Ctx` is **not thread-safe** and is reused.
+  - **CRITICAL:** If you start a Goroutine (e.g., for RabbitMQ tracking) inside a handler, **DO NOT** pass `c` or `c.Locals` directly. Copy the values you need (like UserID, IP, UserAgent) into local variables *before* starting the goroutine.
+- **Response:**
+  - For API: `return c.Status(fiber.StatusOK).JSON(fiber.Map{...})`
+  - For UI: `return c.Render("template_name", fiber.Map{...})` (Do not include .html extension in the name).
+- **Parsing:** Use `c.BodyParser(&struct)` for both JSON and Form Data.
+
+## GORM & Database (The "Queries" Pattern)
+- **Separation of Concerns:** Controllers must NEVER directly access `gorm.DB`. They must use structs defined in `app/queries`.
+- **Injection:** Pass the `*gorm.DB` instance to the Query struct.
+- **Tags:** Ensure structs in `app/models` have both `json:"..."` and `gorm:"..."` tags.
+- **Performance:** Use `.Select()` to fetch only needed fields if the table is large. Use `Preload()` for associations.
+- **Models and Delete Rules**: Always use soft delete mechanism. Make softdelete logic abstraction so it can be resuded in all models.
+
+## RabbitMQ / Async
+- Use the `platform/queue` package to publish events.
+- Tracking analytics must be **non-blocking** (Fire-and-forget).
+- Ensure the publishing context has a timeout (5 seconds).
+
+# Code Generation Rules
+
+1. **When creating a new feature:**
+   - Create the Model in `app/models`.
+   - Create the Logic in `app/queries`.
+   - Create the Handler in `app/controllers`.
+   - Register the Route in `pkg/routes`.
+
+2. **When modifying UI:**
+   - Edit files in `views/`.
+   - Ensure the controller passes the correct `fiber.Map` data.
+
+3. **Security:**
+   - Always validate inputs in the Controller before passing to Queries.
+   - Use `bcrypt` for passwords.
+   - For Web UI routes, assume we need to check for Cookies/JWT.
+
+# Example Snippet (Controller using Query)
+
+```go
+func GetLink(c *fiber.Ctx) error {
+    // 1. Setup (Ideally injected, but for this boilerplate often instantiated per request)
+    db, _ := database.ReturnDB() // or however db is accessed
+    q := &queries.LinkQuery{DB: db}
+
+    // 2. Logic
+    code := c.Params("code")
+    data, err := q.GetByCode(code)
+    if err != nil {
+        return c.Status(404).SendString("Not Found")
+    }
+
+    // 3. Response
+    return c.JSON(data)
+}
+```
+# Concurrency & Performance
+- Fiber is fast. Avoid blocking the event loop.
+- For heavy tasks (like analytics/tracking), fire off a goroutine or publish to RabbitMQ immediately.
+- Use `context.WithTimeout` when calling external services or slow DB queries inside `go routines`.
+- Be careful with `c.Context()` inside goroutines. Copy values (like `c.IP()`, `c.Params()`) to local variables before passing them to async functions, as Fiber reuses context objects.
+
+# Security Best Practices
+- **Passwords:** Never store plain text. Use `bcrypt` before saving to DB.
+- **Auth:** Use JWT for APIs (Authorization header) and HTTP-only Cookies for Web UI.
+- **Sanitization:** Fiber's template engine handles HTML escaping, but be wary of `template.HTML`.
+- **Input Validation:** Validate struct fields (use `go-playground/validator` if necessary).
+
+# Documentation
+- Add comments for exported functions explaining *what* it does and *why*.
+- If an algorithm is complex, explain the logic step-by-step in comments.

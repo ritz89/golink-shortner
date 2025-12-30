@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>onjourney.link - URL Shortener</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-50 to-purple-50 min-h-screen">
+    <div class="container mx-auto px-4 py-16">
+        <div class="max-w-2xl mx-auto">
+            <!-- Header -->
+            <div class="text-center mb-12">
+                <h1 class="text-5xl font-bold text-gray-900 mb-4">onjourney.link</h1>
+                <p class="text-xl text-gray-600">Shorten your long URLs quickly and easily</p>
+            </div>
+
+            <!-- Form Card -->
+            <div class="bg-white rounded-lg shadow-xl p-8 mb-8">
+                <form id="shortenForm" class="space-y-4">
+                    <div>
+                        <label for="originalUrl" class="block text-sm font-medium text-gray-700 mb-2">
+                            Enter your long URL
+                        </label>
+                        <input 
+                            type="url" 
+                            id="originalUrl" 
+                            name="original_url" 
+                            required
+                            placeholder="https://example.com/very/long/url/that/needs/shortening"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-lg"
+                        >
+                    </div>
+                    
+                    <div>
+                        <label for="customCode" class="block text-sm font-medium text-gray-700 mb-2">
+                            Custom code (optional)
+                        </label>
+                        <input 
+                            type="text" 
+                            id="customCode" 
+                            name="code" 
+                            placeholder="my-custom-code"
+                            pattern="[a-zA-Z0-9_-]{4,20}"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-lg"
+                        >
+                        <p class="mt-1 text-sm text-gray-500">4-20 alphanumeric characters, hyphens, or underscores</p>
+                    </div>
+
+                    <button 
+                        type="submit"
+                        class="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold text-lg hover:bg-indigo-700 transition-colors duration-200"
+                    >
+                        Shorten URL
+                    </button>
+                </form>
+            </div>
+
+            <!-- Result Card -->
+            <div id="resultCard" class="hidden bg-white rounded-lg shadow-xl p-8">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4">Your shortened URL:</h2>
+                <div class="flex items-center space-x-4">
+                    <input 
+                        type="text" 
+                        id="shortUrl" 
+                        readonly
+                        class="flex-1 px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 font-mono text-lg"
+                    >
+                    <button 
+                        onclick="copyShortUrl()"
+                        class="px-6 py-3 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-colors duration-200"
+                    >
+                        Copy
+                    </button>
+                </div>
+                <div class="mt-4">
+                    <a href="/" class="text-indigo-600 hover:text-indigo-800">Create another short link</a>
+                </div>
+            </div>
+
+            <!-- Error Message -->
+            <div id="errorMessage" class="hidden bg-red-50 border border-red-200 rounded-lg p-4 text-red-800 mb-8">
+                <p id="errorText"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const baseURL = window.location.origin;
+
+        document.getElementById('shortenForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const data = {
+                original_url: formData.get('original_url'),
+            };
+            
+            const code = formData.get('code');
+            if (code && code.trim() !== '') {
+                data.code = code.trim();
+            }
+
+            // Hide previous results/errors
+            document.getElementById('resultCard').classList.add('hidden');
+            document.getElementById('errorMessage').classList.add('hidden');
+
+            try {
+                const response = await fetch('/shorten', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    const shortUrl = baseURL + '/' + result.data.code;
+                    document.getElementById('shortUrl').value = shortUrl;
+                    document.getElementById('resultCard').classList.remove('hidden');
+                    
+                    // Scroll to result
+                    document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                } else {
+                    document.getElementById('errorText').textContent = result.error || 'Failed to shorten URL';
+                    document.getElementById('errorMessage').classList.remove('hidden');
+                }
+            } catch (error) {
+                document.getElementById('errorText').textContent = 'An error occurred. Please try again.';
+                document.getElementById('errorMessage').classList.remove('hidden');
+            }
+        });
+
+        async function copyShortUrl() {
+            const shortUrlInput = document.getElementById('shortUrl');
+            try {
+                await navigator.clipboard.writeText(shortUrlInput.value);
+                const button = event.target;
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('bg-green-600');
+                button.classList.remove('bg-indigo-600');
+                
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('bg-green-600');
+                    button.classList.add('bg-indigo-600');
+                }, 2000);
+            } catch (err) {
+                // Fallback
+                shortUrlInput.select();
+                document.execCommand('copy');
+                alert('Copied to clipboard!');
+            }
+        }
+    </script>
+</body>
+</html>
+

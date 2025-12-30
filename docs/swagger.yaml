@@ -1,0 +1,89 @@
+openapi: 3.0.0
+info:
+  title: onjourney.link API
+  version: 1.0.0
+  description: URL Shortener API with rate limiting and RabbitMQ integration
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+
+paths:
+  /api/v1/links:
+    post:
+      summary: Create a short link
+      tags:
+        - Links
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - original_url
+              properties:
+                original_url:
+                  type: string
+                  format: uri
+                  example: https://example.com
+                code:
+                  type: string
+                  description: Optional custom short code (4-20 alphanumeric characters)
+                  example: mylink
+      responses:
+        '201':
+          description: Link created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                      original_url:
+                        type: string
+                      short_url:
+                        type: string
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized - Invalid or missing API token
+        '409':
+          description: Code already exists
+        '500':
+          description: Internal server error
+
+  /{code}:
+    get:
+      summary: Redirect to original URL
+      tags:
+        - Links
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Short link code
+      responses:
+        '302':
+          description: Redirect to original URL
+        '404':
+          description: Link not found
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Token
+      description: API token for authentication
+

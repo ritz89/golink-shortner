@@ -1,0 +1,43 @@
+{{define "layouts/base"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{if .Title}}{{.Title}} - {{end}}onjourney.link</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* shadcn-style base styles */
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="/admin" class="text-xl font-bold text-gray-900">onjourney.link</a>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="/admin" class="text-gray-600 hover:text-gray-900">Dashboard</a>
+                    <a href="/admin/links" class="text-gray-600 hover:text-gray-900">Links</a>
+                    <a href="/admin/tokens" class="text-gray-600 hover:text-gray-900">API Tokens</a>
+                    <a href="/admin/users" class="text-gray-600 hover:text-gray-900">Users</a>
+                    <form action="/admin/logout" method="POST" class="inline">
+                        <button type="submit" class="text-gray-600 hover:text-gray-900">Logout</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </nav>
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {{embed}}
+    </main>
+</body>
+</html>
+{{end}}
