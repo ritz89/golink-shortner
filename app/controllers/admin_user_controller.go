@@ -36,8 +36,8 @@ func ListAdminUsers(c fiber.Ctx) error {
 	responseUsers := make([]fiber.Map, len(users))
 	for i, user := range users {
 		responseUsers[i] = fiber.Map{
-			"id":        user.ID,
-			"username":  user.Username,
+			"id":         user.ID,
+			"username":   user.Username,
 			"created_at": user.CreatedAt,
 		}
 	}
@@ -81,8 +81,8 @@ func CreateAdminUser(c fiber.Ctx) error {
 	return c.Status(201).JSON(fiber.Map{
 		"success": true,
 		"data": fiber.Map{
-			"id":        user.ID,
-			"username":  user.Username,
+			"id":         user.ID,
+			"username":   user.Username,
 			"created_at": user.CreatedAt,
 		},
 	})
@@ -91,7 +91,7 @@ func CreateAdminUser(c fiber.Ctx) error {
 // UpdateAdminUser handles PUT /api/v1/admin/users/:id
 func UpdateAdminUser(c fiber.Ctx) error {
 	id := fiber.Params[int](c, "id")
-	if id == 0 {
+	if id <= 0 {
 		return c.Status(400).JSON(fiber.Map{
 			"error": "Invalid user ID",
 		})
@@ -136,8 +136,8 @@ func UpdateAdminUser(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data": fiber.Map{
-			"id":        existingUser.ID,
-			"username":  existingUser.Username,
+			"id":         existingUser.ID,
+			"username":   existingUser.Username,
 			"created_at": existingUser.CreatedAt,
 		},
 	})
@@ -146,7 +146,7 @@ func UpdateAdminUser(c fiber.Ctx) error {
 // DeleteAdminUser handles DELETE /api/v1/admin/users/:id
 func DeleteAdminUser(c fiber.Ctx) error {
 	id := fiber.Params[int](c, "id")
-	if id == 0 {
+	if id <= 0 {
 		return c.Status(400).JSON(fiber.Map{
 			"error": "Invalid user ID",
 		})
@@ -166,4 +166,3 @@ func DeleteAdminUser(c fiber.Ctx) error {
 		"message": "User deleted successfully",
 	})
 }
-

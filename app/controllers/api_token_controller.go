@@ -99,7 +99,7 @@ func ListTokens(c fiber.Ctx) error {
 // UpdateToken handles PUT /api/v1/admin/tokens/:id
 func UpdateToken(c fiber.Ctx) error {
 	id := fiber.Params[int](c, "id")
-	if id == 0 {
+	if id <= 0 {
 		return c.Status(400).JSON(fiber.Map{
 			"error": "Invalid token ID",
 		})
@@ -161,7 +161,7 @@ func UpdateToken(c fiber.Ctx) error {
 // DeleteToken handles DELETE /api/v1/admin/tokens/:id
 func DeleteToken(c fiber.Ctx) error {
 	id := fiber.Params[int](c, "id")
-	if id == 0 {
+	if id <= 0 {
 		return c.Status(400).JSON(fiber.Map{
 			"error": "Invalid token ID",
 		})

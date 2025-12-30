@@ -83,7 +83,9 @@ func getOrCreateConnection(token *models.APIToken) (*amqp.Channel, error) {
 
 	channel, err := conn.Channel()
 	if err != nil {
-		conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			log.Printf("Failed to close connection after channel error: %v", closeErr)
+		}
 		return nil, fmt.Errorf("failed to open channel: %w", err)
 	}
 
@@ -186,10 +188,14 @@ func Close() {
 
 	for key, conn := range pool.pools {
 		if conn.channel != nil {
-			conn.channel.Close()
+			if err := conn.channel.Close(); err != nil {
+				log.Printf("Failed to close channel for key %s: %v", key, err)
+			}
 		}
 		if conn.conn != nil {
-			conn.conn.Close()
+			if err := conn.conn.Close(); err != nil {
+				log.Printf("Failed to close connection for key %s: %v", key, err)
+			}
 		}
 		delete(pool.pools, key)
 	}
