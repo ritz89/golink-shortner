@@ -122,6 +122,65 @@ Common causes:
 
 ---
 
+### `ensure-all-instances-healthy.sh` ⭐ NEW
+
+**Purpose:** Ensure all instances in Target Group are healthy by deploying to unhealthy instances
+
+**Usage:**
+```bash
+# From your local machine (with AWS CLI configured)
+chmod +x scripts/ensure-all-instances-healthy.sh
+./scripts/ensure-all-instances-healthy.sh
+```
+
+**What it does:**
+1. Checks Target Group health status for all instances
+2. Identifies unhealthy instances
+3. Deploys application to unhealthy instances via SSM
+4. Waits for health checks to complete
+5. Verifies all instances are healthy
+
+**Features:**
+- Automatic deployment to unhealthy instances
+- SSM agent status checking and waiting
+- Health check monitoring with progress updates
+- Final status summary
+
+**Example Output:**
+```
+1. Checking Target Group Health Status...
+   Healthy instances: i-0ff97b3a5965051f6
+   Unhealthy instances: i-01f445c7fe2a902ee
+
+2. Summary:
+   Total targets: 2
+   Healthy: 1
+   Unhealthy: 1
+
+3. Deploying to unhealthy instances...
+   ✅ Deployment successful
+
+4. Waiting for health checks to complete...
+   [15/180s] Healthy: 1/1
+
+✅ SUCCESS: All instances are healthy!
+```
+
+**Requirements:**
+- AWS CLI configured
+- IAM permissions: `elbv2:Describe*`, `autoscaling:Describe*`, `ec2:Describe*`, `ssm:SendCommand`, `ssm:GetCommandInvocation`
+- ECR_REGISTRY environment variable (or will auto-detect from AWS account)
+
+**Environment Variables:**
+- `ECR_REGISTRY` - ECR registry URL (optional, will auto-detect)
+- `IMAGE_NAME` - Docker image name (default: `onjourney-golink-shortner`)
+- `IMAGE_TAG` - Docker image tag (default: `latest`)
+- `AWS_REGION` - AWS region (default: `ap-southeast-1`)
+- `TARGET_GROUP_NAME` - Target Group name (default: `onjourney-golink-shortner-tg`)
+- `ASG_NAME` - Auto Scaling Group name (default: `onjourney-golink-asg`)
+
+---
+
 ### `validate-alb-config.sh` ⭐ NEW
 
 **Purpose:** Validate ALB, Target Group, and ASG configuration to diagnose why instances are not appearing
