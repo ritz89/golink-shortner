@@ -81,8 +81,10 @@ jobs:
             else
               echo "Found instances in ASG: $INSTANCES"
               echo "use_asg=true" >> $GITHUB_OUTPUT
-              # Save instances to file for later use
-              echo "$INSTANCES" | tr ' ' '\n' > instances.txt
+              # Save instances to file for later use (handle both space and tab separators)
+              echo "$INSTANCES" | tr ' \t' '\n' | grep -v '^$' > instances.txt
+              echo "Instance IDs saved to instances.txt:"
+              cat instances.txt
             fi
           else
             echo "ASG_NAME not set, using single EC2"
@@ -98,6 +100,11 @@ jobs:
           AWS_REGION="${{ env.AWS_REGION }}"
           
           while IFS= read -r INSTANCE_ID; do
+            # Skip empty lines
+            if [ -z "$INSTANCE_ID" ]; then
+              continue
+            fi
+            
             echo "=========================================="
             echo "Deploying to instance: $INSTANCE_ID"
             echo "=========================================="

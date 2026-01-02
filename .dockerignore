@@ -1,1 +1,36 @@
-*_test.go
+# Git
+.git
+.gitignore
+.github
+
+# Documentation
+README.md
+LICENSE
+docs/swagger.yaml
+
+# Development
+.env
+.env.local
+.env.*.local
+*.log
+
+# Build artifacts
+bin/
+tmp/
+*.test
+*.out
+
+# IDE
+.vscode
+.idea
+.DS_Store
+
+# CI/CD
+.github
+
+# Air (hot reload)
+.air.toml
+
+# Docker
+Dockerfile
+.dockerignore
