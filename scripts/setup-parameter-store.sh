@@ -35,6 +35,9 @@ fi
 read -p "Database Name [onjourney_link]: " DB_NAME
 DB_NAME=${DB_NAME:-onjourney_link}
 
+read -p "Database Timezone [+07:00 (UTC+7, WIB/Asia/Jakarta)]: " DB_TIMEZONE
+DB_TIMEZONE=${DB_TIMEZONE:-+07:00}
+
 echo ""
 echo "Creating parameters in Parameter Store..."
 echo ""
@@ -86,6 +89,16 @@ aws ssm put-parameter \
     --type "String" \
     --value "$DB_NAME" \
     --description "Database name" \
+    --region "$AWS_REGION" \
+    --overwrite 2>/dev/null && echo "✅ Created/Updated" || echo "⚠️  Already exists (use --overwrite to update)"
+
+# Create database timezone parameter
+echo "Creating /golink-shorner/db/timezone..."
+aws ssm put-parameter \
+    --name "${PARAMETER_PREFIX}/timezone" \
+    --type "String" \
+    --value "$DB_TIMEZONE" \
+    --description "Database timezone (default: +07:00 = UTC+7 = WIB/Asia/Jakarta, PostgreSQL compatible)" \
     --region "$AWS_REGION" \
     --overwrite 2>/dev/null && echo "✅ Created/Updated" || echo "⚠️  Already exists (use --overwrite to update)"
 
