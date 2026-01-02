@@ -18,7 +18,7 @@ echo "=========================================="
 # Check if ECR_REGISTRY is set
 if [ -z "$ECR_REGISTRY" ]; then
     echo "Error: ECR_REGISTRY environment variable is not set"
-    echo "Please set it to your ECR registry URL (e.g., 123456789012.dkr.ecr.ap-southeast-1.amazonaws.com)"
+    echo "Please set it to your ECR registry URL - example: 123456789012.dkr.ecr.ap-southeast-1.amazonaws.com"
     exit 1
 fi
 
@@ -33,10 +33,16 @@ aws ecr get-login-password --region $REGION | \
 echo "Pulling latest image: $FULL_IMAGE"
 docker pull $FULL_IMAGE
 
-# Stop and remove old container
+# Stop and remove old container (if exists)
 echo "Stopping old container..."
-docker stop $CONTAINER_NAME 2>/dev/null || true
-docker rm $CONTAINER_NAME 2>/dev/null || true
+if docker ps -a | grep -q "$CONTAINER_NAME"; then
+    echo "   Found existing container, stopping and removing..."
+    docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    docker rm "$CONTAINER_NAME" 2>/dev/null || true
+    echo "   [OK] Old container removed"
+else
+    echo "   No existing container found"
+fi
 
 # Always retrieve credentials from Parameter Store and replace .env file
 echo "Retrieving database credentials from Parameter Store..."
@@ -44,7 +50,7 @@ mkdir -p /home/ec2-user
 
 # Try to retrieve from Parameter Store
 if aws ssm get-parameter --name /golink-shorner/db/host --region $REGION --query 'Parameter.Value' --output text 2>/dev/null > /dev/null; then
-    echo "✅ Parameter Store accessible, retrieving all credentials..."
+    echo "[OK] Parameter Store accessible, retrieving all credentials..."
     DB_HOST=$(aws ssm get-parameter --name /golink-shorner/db/host --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "")
     DB_PORT=$(aws ssm get-parameter --name /golink-shorner/db/port --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "5432")
     DB_USER=$(aws ssm get-parameter --name /golink-shorner/db/user --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney")
@@ -53,7 +59,7 @@ if aws ssm get-parameter --name /golink-shorner/db/host --region $REGION --query
     
     # Validate required values
     if [ -z "$DB_HOST" ] || [ -z "$DB_PASSWORD" ]; then
-        echo "❌ ERROR: Failed to retrieve required credentials from Parameter Store"
+        echo "[ERROR] ERROR: Failed to retrieve required credentials from Parameter Store"
         echo "   DB_HOST: ${DB_HOST:-MISSING}"
         echo "   DB_PASSWORD: ${DB_PASSWORD:+SET}${DB_PASSWORD:-MISSING}"
         exit 1
@@ -73,24 +79,24 @@ EOF
     
     chmod 600 /home/ec2-user/.env
     
-    echo "✅ Successfully updated .env file from Parameter Store"
+    echo "[OK] Successfully updated .env file from Parameter Store"
     echo "   DB_HOST: $DB_HOST"
     echo "   DB_PORT: $DB_PORT"
     echo "   DB_USER: $DB_USER"
     echo "   DB_NAME: $DB_NAME"
     echo "   DB_PASSWORD: [REDACTED]"
 else
-    echo "❌ ERROR: Parameter Store not accessible"
+    echo "[ERROR] ERROR: Parameter Store not accessible"
     echo "Please ensure:"
-    echo "  1. Parameter Store is configured (see docs/AWS_SETUP.md section 6)"
-    echo "  2. IAM role has Parameter Store access (SecretsManagerReadWrite policy)"
-    echo "  3. Parameters exist: /golink-shorner/db/*"
+    echo '  1. Parameter Store is configured (see docs/AWS_SETUP.md)'
+    echo '  2. IAM role has Parameter Store access (SecretsManagerReadWrite policy)'
+    echo '  3. Parameters exist: /golink-shorner/db/*'
     exit 1
 fi
 
 # Verify .env file was created correctly
 if [ ! -f /home/ec2-user/.env ]; then
-    echo "❌ ERROR: .env file was not created"
+    echo "[ERROR] ERROR: .env file was not created"
     exit 1
 fi
 
@@ -98,14 +104,14 @@ fi
 if ! grep -q "^DB_HOST=" /home/ec2-user/.env || \
    ! grep -q "^DB_PASSWORD=" /home/ec2-user/.env || \
    grep -q "^DB_PASSWORD=$" /home/ec2-user/.env; then
-    echo "❌ ERROR: .env file is incomplete or invalid"
+    echo "[ERROR] ERROR: .env file is incomplete or invalid"
     echo "Current .env content:"
     cat /home/ec2-user/.env | sed 's/DB_PASSWORD=.*/DB_PASSWORD=[REDACTED]/'
     exit 1
 fi
 
 ENV_FILE_ARG="--env-file /home/ec2-user/.env"
-echo "✅ .env file found and validated"
+echo "[OK] .env file found and validated"
 
 # Run new container
 echo "Starting new container..."
@@ -127,16 +133,36 @@ echo "Ensuring nginx is configured and running..."
 if ! command -v nginx &> /dev/null; then
     echo "Nginx not found, installing..."
     sudo yum install -y nginx || {
-        echo "❌ ERROR: Failed to install nginx"
+        echo "[ERROR] ERROR: Failed to install nginx"
         exit 1
     }
 fi
 
 # Disable default nginx server block to avoid conflicts
+# Be more aggressive - check all possible locations and disable them
+echo "Disabling default nginx server blocks to avoid conflicts..."
 if [ -f /etc/nginx/conf.d/default.conf ]; then
-    echo "Disabling default nginx server block..."
+    echo "   Disabling /etc/nginx/conf.d/default.conf..."
     sudo mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.disabled 2>/dev/null || true
 fi
+if [ -f /etc/nginx/sites-enabled/default ]; then
+    echo "   Disabling /etc/nginx/sites-enabled/default..."
+    sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+fi
+if [ -f /etc/nginx/sites-available/default ]; then
+    echo "   Disabling /etc/nginx/sites-available/default..."
+    sudo mv /etc/nginx/sites-available/default /etc/nginx/sites-available/default.disabled 2>/dev/null || true
+fi
+# Also check for any other default server blocks
+for conf_file in /etc/nginx/conf.d/*.conf; do
+    if [ -f "$conf_file" ] && [ "$(basename "$conf_file")" != "golink-shorner.conf" ]; then
+        # Check if it's a default server block
+        if grep -q "listen.*80" "$conf_file" 2>/dev/null; then
+            echo "   Disabling conflicting config: $conf_file..."
+            sudo mv "$conf_file" "${conf_file}.disabled" 2>/dev/null || true
+        fi
+    fi
+done
 
 # Always recreate nginx config to ensure it's correct
 echo "Creating/updating nginx reverse proxy configuration..."
@@ -179,28 +205,29 @@ server {
 }
 NGINXEOF
 then
-    echo "❌ ERROR: Failed to create nginx configuration file"
+    echo "[ERROR] ERROR: Failed to create nginx configuration file"
     exit 1
 fi
 
 # Verify config file was created and has content
 NGINX_CONFIG="/etc/nginx/conf.d/golink-shorner.conf"
 if [ ! -f "$NGINX_CONFIG" ]; then
-    echo "❌ ERROR: Nginx configuration file was not created: $NGINX_CONFIG"
+    echo "[ERROR] ERROR: Nginx configuration file was not created: $NGINX_CONFIG"
     exit 1
 fi
 
 if [ ! -s "$NGINX_CONFIG" ]; then
-    echo "❌ ERROR: Nginx configuration file is empty: $NGINX_CONFIG"
+    echo "[ERROR] ERROR: Nginx configuration file is empty: $NGINX_CONFIG"
     exit 1
 fi
 
-echo "✅ Nginx config created/updated (file size: $(wc -c < "$NGINX_CONFIG") bytes)"
+NGINX_CONFIG_SIZE=$(wc -c < "$NGINX_CONFIG")
+echo "Nginx config created/updated - file size: ${NGINX_CONFIG_SIZE} bytes"
 
 # Test nginx configuration
 echo "Testing nginx configuration..."
 if ! sudo nginx -t; then
-    echo "❌ ERROR: Nginx configuration test failed"
+    echo "[ERROR] ERROR: Nginx configuration test failed"
     echo "Checking nginx config files..."
     sudo nginx -T 2>&1 | head -50
     exit 1
@@ -209,7 +236,7 @@ fi
 # Restart nginx (not reload) to ensure all changes are applied
 echo "Restarting nginx to apply configuration..."
 if ! sudo systemctl restart nginx; then
-    echo "❌ ERROR: Failed to restart nginx"
+    echo "[ERROR] ERROR: Failed to restart nginx"
     echo "Checking nginx status and logs..."
     sudo systemctl status nginx --no-pager | head -20
     sudo journalctl -u nginx --no-pager -n 20 || true
@@ -219,11 +246,11 @@ sudo systemctl enable nginx || true
 
 # Verify nginx is running
 if ! systemctl is-active nginx > /dev/null 2>&1; then
-    echo "⚠️  Warning: nginx failed to start. Checking status..."
+    echo "[WARN]  Warning: nginx failed to start. Checking status..."
     sudo systemctl status nginx --no-pager | head -10
-    echo "⚠️  Continuing deployment, but nginx may need manual intervention"
+    echo "[WARN]  Continuing deployment, but nginx may need manual intervention"
 else
-    echo "✅ Nginx is running"
+    echo "[OK] Nginx is running"
 fi
 
 # Health check
@@ -232,46 +259,46 @@ MAX_RETRIES=10
 RETRY_COUNT=0
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    # First check direct app (port 3000)
+    # First check direct app - port: 3000)
     if curl -f -s http://localhost:$PORT/health > /dev/null 2>&1; then
-        echo "✅ Application health check passed (port $PORT)"
+        echo "[OK] Application health check passed - port: $PORT"
         
-        # Then check via nginx (port 80)
+        # Then check via nginx - port: 80)
         if curl -f -s http://localhost/health > /dev/null 2>&1; then
-            echo "✅ Nginx health check passed (port 80)"
+            echo "[OK] Nginx health check passed - port: 80"
             echo "=========================================="
-            echo "✅ Deployment successful!"
+            echo "[OK] Deployment successful!"
             echo "=========================================="
             echo "Container: $CONTAINER_NAME"
             echo "Image: $FULL_IMAGE"
             echo "Port: $PORT"
-            echo "Health check: OK (both app and nginx)"
+            echo "Health check: OK - both app and nginx"
             exit 0
         else
-            echo "⚠️  Application OK but nginx not responding on port 80"
+            echo "[WARN]  Application OK but nginx not responding on port 80"
             echo "   Checking nginx status..."
             sudo systemctl status nginx --no-pager | head -5
             RETRY_COUNT=$((RETRY_COUNT + 1))
-            echo "   Retrying nginx health check... ($RETRY_COUNT/$MAX_RETRIES)"
+            echo "   Retrying nginx health check... attempt $RETRY_COUNT of $MAX_RETRIES"
             sleep 3
         fi
     else
         RETRY_COUNT=$((RETRY_COUNT + 1))
-        echo "Health check failed, retrying... ($RETRY_COUNT/$MAX_RETRIES)"
+        echo "Health check failed, retrying... attempt ${RETRY_COUNT} of ${MAX_RETRIES}"
         sleep 3
     fi
 done
 
-echo "=========================================="
-echo "❌ Deployment failed - Health check timeout"
-echo "=========================================="
-echo "Checking container logs..."
+echo '=========================================='
+echo '[ERROR] Deployment failed - Health check timeout'
+echo '=========================================='
+echo 'Checking container logs...'
 docker logs $CONTAINER_NAME --tail 50
-echo ""
-echo "Checking nginx status..."
+echo ''
+echo 'Checking nginx status...'
 sudo systemctl status nginx --no-pager | head -10
-echo ""
-echo "Checking nginx error logs..."
-sudo tail -20 /var/log/nginx/error.log 2>/dev/null || echo "No nginx error logs"
+echo ''
+echo 'Checking nginx error logs...'
+sudo tail -20 /var/log/nginx/error.log 2>/dev/null || echo 'No nginx error logs found'
 exit 1
 
