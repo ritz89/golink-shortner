@@ -36,6 +36,53 @@ sudo yum install -y jq
 echo "Installing nginx..."
 sudo yum install -y nginx
 
+# Configure nginx reverse proxy
+echo "Configuring nginx reverse proxy..."
+sudo tee /etc/nginx/conf.d/golink-shorner.conf > /dev/null <<'NGINXEOF'
+upstream golink_shorner {
+    server localhost:3000;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    # Health check endpoint
+    location /health {
+        proxy_pass http://golink_shorner/health;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        access_log off;
+    }
+
+    # All other requests
+    location / {
+        proxy_pass http://golink_shorner;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+NGINXEOF
+
+# Test and start nginx
+echo "Testing nginx configuration..."
+sudo nginx -t
+sudo systemctl enable nginx
+sudo systemctl start nginx
+echo "✅ Nginx configured and started"
+
 # curl-minimal is already installed by default on Amazon Linux 2023
 # No need to install curl separately, curl-minimal is sufficient
 # If you need full curl features, use: sudo yum install -y curl --allowerasing
