@@ -34,6 +34,9 @@ jobs:
     name: Build and Push to ECR
     needs: test
     runs-on: ubuntu-latest
+    # Use environment if secrets are configured in GitHub Environment
+    # If secrets are in repository-level, remove this line
+    environment: production
     
     steps:
       - name: Checkout code
