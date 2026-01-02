@@ -54,7 +54,7 @@ if [ ! -f /home/ec2-user/.env ]; then
         DB_USER=$(aws ssm get-parameter --name /golink-shorner/db/user --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney")
         DB_PASSWORD=$(aws ssm get-parameter --name /golink-shorner/db/password --with-decryption --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "")
         DB_NAME=$(aws ssm get-parameter --name /golink-shorner/db/name --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney_link")
-        DB_TIMEZONE=$(aws ssm get-parameter --name /golink-shorner/db/timezone --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "+07:00") # UTC+7 (WIB/Asia/Jakarta)
+        DB_TIMEZONE=$(aws ssm get-parameter --name /golink-shorner/db/timezone --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "Asia/Jakarta") # WIB (UTC+7)
         
         # Create .env file with retrieved values
         cat > /home/ec2-user/.env << EOF

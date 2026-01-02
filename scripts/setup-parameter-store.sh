@@ -35,8 +35,8 @@ fi
 read -p "Database Name [onjourney_link]: " DB_NAME
 DB_NAME=${DB_NAME:-onjourney_link}
 
-read -p "Database Timezone [+07:00 (UTC+7, WIB/Asia/Jakarta)]: " DB_TIMEZONE
-DB_TIMEZONE=${DB_TIMEZONE:-+07:00}
+read -p "Database Timezone [Asia/Jakarta (WIB, UTC+7)]: " DB_TIMEZONE
+DB_TIMEZONE=${DB_TIMEZONE:-Asia/Jakarta}
 
 echo ""
 echo "Creating parameters in Parameter Store..."
@@ -98,7 +98,7 @@ aws ssm put-parameter \
     --name "${PARAMETER_PREFIX}/timezone" \
     --type "String" \
     --value "$DB_TIMEZONE" \
-    --description "Database timezone (default: +07:00 = UTC+7 = WIB/Asia/Jakarta, PostgreSQL compatible)" \
+    --description "Database timezone (default: Asia/Jakarta = WIB = UTC+7, PostgreSQL compatible)" \
     --region "$AWS_REGION" \
     --overwrite 2>/dev/null && echo "✅ Created/Updated" || echo "⚠️  Already exists (use --overwrite to update)"
 
