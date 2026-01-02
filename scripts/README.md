@@ -4,6 +4,37 @@ Scripts untuk deployment dan maintenance aplikasi golink-shorner di EC2.
 
 ## Scripts
 
+### `setup-parameter-store.sh` ⭐ NEW
+
+**Purpose:** Setup AWS Systems Manager Parameter Store untuk menyimpan database credentials secara aman.
+
+**Usage:**
+```bash
+# From your local machine (with AWS CLI configured)
+chmod +x scripts/setup-parameter-store.sh
+./scripts/setup-parameter-store.sh
+```
+
+**What it does:**
+- Prompts untuk input database credentials (password di-mask saat input)
+- Creates semua required parameters di Parameter Store
+- Stores password sebagai SecureString (encrypted)
+- Verifies bahwa parameters berhasil dibuat
+
+**Security:**
+- ✅ Password tidak muncul di terminal (masked input)
+- ✅ Tidak ada credentials di command history
+- ✅ Password disimpan sebagai SecureString (encrypted dengan KMS)
+
+**Required Parameters:**
+- `/golink-shorner/db/host` - Database host
+- `/golink-shorner/db/port` - Database port
+- `/golink-shorner/db/user` - Database user
+- `/golink-shorner/db/password` - Database password (SecureString)
+- `/golink-shorner/db/name` - Database name
+
+**Note:** Script ini harus di-run **SEBELUM** instance di-launch, atau instance akan fail karena tidak ada credentials.
+
 ### `upload-to-s3.sh`
 
 Script untuk upload deployment scripts ke S3 bucket. Karena repository private, scripts perlu di-upload ke S3 terlebih dahulu sebelum bisa di-download di EC2 instance.

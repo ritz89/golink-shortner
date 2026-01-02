@@ -42,20 +42,53 @@ echo "Creating application directory..."
 mkdir -p /home/ec2-user/app
 mkdir -p /home/ec2-user/scripts
 
-# Create .env file template
+# Create .env file - Try to retrieve from Parameter Store first, fallback to template
 if [ ! -f /home/ec2-user/.env ]; then
-    echo "Creating .env file template..."
-    cat > /home/ec2-user/.env << 'EOF'
-# Database Configuration
-DB_HOST=your-db-host.rds.amazonaws.com
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=your_password_here
-DB_NAME=link_shorner
+    echo "Creating .env file..."
+    
+    # Try to retrieve from Parameter Store (if configured)
+    if aws ssm get-parameter --name /golink-shorner/db/host --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null > /dev/null; then
+        echo "Retrieving database credentials from Parameter Store..."
+        DB_HOST=$(aws ssm get-parameter --name /golink-shorner/db/host --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+        DB_PORT=$(aws ssm get-parameter --name /golink-shorner/db/port --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "5432")
+        DB_USER=$(aws ssm get-parameter --name /golink-shorner/db/user --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney")
+        DB_PASSWORD=$(aws ssm get-parameter --name /golink-shorner/db/password --with-decryption --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+        DB_NAME=$(aws ssm get-parameter --name /golink-shorner/db/name --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney_link")
+        
+        # Create .env file with retrieved values
+        cat > /home/ec2-user/.env << EOF
+# Database Configuration (retrieved from Parameter Store)
+DB_HOST=${DB_HOST}
+DB_PORT=${DB_PORT}
+DB_USER=${DB_USER}
+DB_PASSWORD=${DB_PASSWORD}
+DB_NAME=${DB_NAME}
 DB_SSLMODE=require
 DB_TIMEZONE=Asia/Jakarta
 EOF
-    echo "⚠️  Please edit /home/ec2-user/.env with your actual database credentials"
+        
+        if [ -z "$DB_HOST" ] || [ -z "$DB_PASSWORD" ]; then
+            echo "⚠️  Warning: Some parameters missing from Parameter Store. Please verify."
+        else
+            echo "✅ Successfully retrieved credentials from Parameter Store"
+        fi
+    else
+        # Parameter Store not configured - fail with clear error message
+        echo "❌ ERROR: Parameter Store not configured!"
+        echo ""
+        echo "Please setup Parameter Store before running this script:"
+        echo "  1. Run: ./scripts/setup-parameter-store.sh (from local machine)"
+        echo "  2. Or setup manually via AWS Console: Systems Manager → Parameter Store"
+        echo "  3. Required parameters:"
+        echo "     - /golink-shorner/db/host"
+        echo "     - /golink-shorner/db/port"
+        echo "     - /golink-shorner/db/user"
+        echo "     - /golink-shorner/db/password (SecureString)"
+        echo "     - /golink-shorner/db/name"
+        echo ""
+        echo "See docs/AWS_SETUP.md section 6 for detailed instructions."
+        exit 1
+    fi
 fi
 
 # Set permissions

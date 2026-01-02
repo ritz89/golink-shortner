@@ -38,14 +38,31 @@ echo "Stopping old container..."
 docker stop $CONTAINER_NAME 2>/dev/null || true
 docker rm $CONTAINER_NAME 2>/dev/null || true
 
-# Check if .env file exists
+# Check if .env file exists and has required variables
 if [ ! -f /home/ec2-user/.env ]; then
-    echo "Warning: .env file not found at /home/ec2-user/.env"
-    echo "Container will run without environment file"
-    ENV_FILE_ARG=""
-else
-    ENV_FILE_ARG="--env-file /home/ec2-user/.env"
+    echo "❌ ERROR: .env file not found at /home/ec2-user/.env"
+    echo "Please create .env file with database credentials before deploying."
+    echo ""
+    echo "Example .env file:"
+    echo "DB_HOST=your-db-host.rds.amazonaws.com"
+    echo "DB_PORT=5432"
+    echo "DB_USER=onjourney"
+    echo "DB_PASSWORD=your_password"
+    echo "DB_NAME=onjourney_link"
+    echo "DB_SSLMODE=require"
+    echo "DB_TIMEZONE=Asia/Jakarta"
+    exit 1
 fi
+
+# Validate that DB_PASSWORD is set in .env file
+if ! grep -q "^DB_PASSWORD=" /home/ec2-user/.env || grep -q "^DB_PASSWORD=$" /home/ec2-user/.env || grep -q "^DB_PASSWORD=your_password" /home/ec2-user/.env; then
+    echo "❌ ERROR: DB_PASSWORD is not set or is using default value in /home/ec2-user/.env"
+    echo "Please edit /home/ec2-user/.env and set DB_PASSWORD to your actual database password."
+    exit 1
+fi
+
+ENV_FILE_ARG="--env-file /home/ec2-user/.env"
+echo "✅ .env file found and validated"
 
 # Run new container
 echo "Starting new container..."
