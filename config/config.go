@@ -12,7 +12,6 @@ type DatabaseConfig struct {
 	Password string
 	DBName   string
 	SSLMode  string
-	TimeZone string
 }
 
 var DB *DatabaseConfig
@@ -26,7 +25,6 @@ func Load() {
 		Password: getEnv("DB_PASSWORD", ""),
 		DBName:   getEnv("DB_NAME", "link_shorner"),
 		SSLMode:  getEnv("DB_SSLMODE", "disable"),
-		TimeZone: getEnv("DB_TIMEZONE", "Asia/Jakarta"), // WIB (UTC+7)
 	}
 
 	// Validate required database config
@@ -38,8 +36,8 @@ func Load() {
 // GetDSN returns PostgreSQL connection string
 func (db *DatabaseConfig) GetDSN() string {
 	return fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=%s",
-		db.Host, db.User, db.Password, db.DBName, db.Port, db.SSLMode, db.TimeZone,
+		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
+		db.Host, db.User, db.Password, db.DBName, db.Port, db.SSLMode,
 	)
 }
 

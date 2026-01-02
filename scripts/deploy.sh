@@ -50,7 +50,6 @@ if aws ssm get-parameter --name /golink-shorner/db/host --region $REGION --query
     DB_USER=$(aws ssm get-parameter --name /golink-shorner/db/user --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney")
     DB_PASSWORD=$(aws ssm get-parameter --name /golink-shorner/db/password --with-decryption --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "")
     DB_NAME=$(aws ssm get-parameter --name /golink-shorner/db/name --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney_link")
-    DB_TIMEZONE=$(aws ssm get-parameter --name /golink-shorner/db/timezone --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "Asia/Jakarta") # WIB (UTC+7)
     
     # Validate required values
     if [ -z "$DB_HOST" ] || [ -z "$DB_PASSWORD" ]; then
@@ -70,7 +69,6 @@ DB_USER=${DB_USER}
 DB_PASSWORD=${DB_PASSWORD}
 DB_NAME=${DB_NAME}
 DB_SSLMODE=require
-DB_TIMEZONE=${DB_TIMEZONE}
 EOF
     
     chmod 600 /home/ec2-user/.env
