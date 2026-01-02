@@ -181,6 +181,47 @@ chmod +x scripts/ensure-all-instances-healthy.sh
 
 ---
 
+### `disable-public-ip-launch-template.sh` ⭐ NEW
+
+**Purpose:** Disable public IP assignment in Launch Template for instances behind ALB
+
+**Usage:**
+```bash
+# From your local machine (with AWS CLI configured)
+chmod +x scripts/disable-public-ip-launch-template.sh
+./scripts/disable-public-ip-launch-template.sh
+```
+
+**Why disable public IP?**
+- ✅ ALB already has public IP - instances don't need it
+- ✅ More secure - instances not directly accessible from internet
+- ✅ Cost savings (small but still savings)
+- ✅ AWS best practice for instances behind load balancer
+
+**What it does:**
+1. Gets current Launch Template configuration
+2. Modifies NetworkInterfaces to disable public IP
+3. Creates new Launch Template version
+4. Sets new version as default
+5. Verifies the change
+
+**Requirements:**
+- AWS CLI configured
+- IAM permissions: `ec2:DescribeLaunchTemplates`, `ec2:CreateLaunchTemplateVersion`, `ec2:ModifyLaunchTemplate`
+- `jq` or `python3` for JSON manipulation
+- **Important:** Subnet must have NAT Gateway for internet access
+
+**Environment Variables:**
+- `LAUNCH_TEMPLATE_ID` - Launch Template ID (default: `lt-02dc4a959747d21b5`)
+- `LAUNCH_TEMPLATE_NAME` - Launch Template name (default: `onjourney-golink-shortner`)
+- `AWS_REGION` - AWS region (default: `ap-southeast-1`)
+
+**Note:** Existing instances will keep their public IP. New instances launched after this change will not have public IP.
+
+See `docs/DISABLE_PUBLIC_IP.md` for detailed explanation and migration strategy.
+
+---
+
 ### `validate-alb-config.sh` ⭐ NEW
 
 **Purpose:** Validate ALB, Target Group, and ASG configuration to diagnose why instances are not appearing
