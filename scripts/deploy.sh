@@ -120,8 +120,62 @@ docker run -d \
 echo "Waiting for container to start..."
 sleep 5
 
-# Ensure nginx is running and reloaded
-echo "Ensuring nginx is running..."
+# Ensure nginx is configured and running
+echo "Ensuring nginx is configured and running..."
+
+# Check if nginx config exists, if not create it
+if [ ! -f /etc/nginx/conf.d/golink-shorner.conf ]; then
+    echo "Nginx config not found, creating it..."
+    sudo tee /etc/nginx/conf.d/golink-shorner.conf > /dev/null <<'NGINXEOF'
+upstream golink_shorner {
+    server localhost:3000;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    # Health check endpoint
+    location /health {
+        proxy_pass http://golink_shorner/health;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        access_log off;
+    }
+
+    # All other requests
+    location / {
+        proxy_pass http://golink_shorner;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+NGINXEOF
+    echo "✅ Nginx config created"
+fi
+
+# Test nginx configuration
+echo "Testing nginx configuration..."
+if ! sudo nginx -t; then
+    echo "❌ ERROR: Nginx configuration test failed"
+    echo "Checking nginx config files..."
+    sudo nginx -T 2>&1 | head -50
+    exit 1
+fi
+
+# Start or reload nginx
 if ! systemctl is-active nginx > /dev/null 2>&1; then
     echo "Starting nginx..."
     sudo systemctl start nginx
