@@ -356,34 +356,132 @@ Launch Template digunakan oleh Auto Scaling Group untuk launch instances baru.
 
 #### User Data Script untuk Launch Template:
 
+**⚠️ CRITICAL:** User Data script **WAJIB** diisi untuk memastikan instance ter-setup dengan benar saat pertama kali di-launch. 
+
+**Kenapa User Data Penting:**
+- ✅ Berjalan **otomatis** saat instance pertama kali di-launch
+- ✅ Memastikan semua dependencies terinstall **sebelum** instance digunakan
+- ✅ Instance siap untuk deployment tanpa setup manual
+- ✅ Konsisten untuk semua instance baru dari ASG
+
+**Opsi 1: Download dan Run setup-ec2.sh dari S3 (Recommended)**
+
 Copy script berikut ke **User data** field di Launch Template:
 
 ```bash
 #!/bin/bash
 # User data script untuk Auto Scaling Group
+# Download dan run setup-ec2.sh dari S3 untuk memastikan semua terinstall
 
-# Update system
-yum update -y
+set -e
 
-# Install Docker
-yum install -y docker
-systemctl start docker
-systemctl enable docker
-usermod -aG docker ec2-user
+# Wait for instance metadata service to be ready
+until curl -s http://169.254.169.254/latest/meta-data/instance-id > /dev/null; do
+    sleep 1
+done
 
-# Install AWS CLI v2
-if ! command -v aws &> /dev/null; then
-    curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip"
-    unzip awscliv2.zip
-    ./aws/install
-    rm -rf aws awscliv2.zip
+# Create directories
+mkdir -p /home/ec2-user/scripts
+mkdir -p /home/ec2-user/app
+
+# Download setup script from S3
+echo "Downloading setup-ec2.sh from S3..."
+aws s3 cp s3://onjourney-asset-bucket/scripts/setup-ec2.sh /home/ec2-user/scripts/setup-ec2.sh || {
+    echo "⚠️  Failed to download setup-ec2.sh from S3"
+    echo "   Will continue with inline setup..."
+}
+
+# Make executable and run
+if [ -f /home/ec2-user/scripts/setup-ec2.sh ]; then
+    chmod +x /home/ec2-user/scripts/setup-ec2.sh
+    echo "Running setup-ec2.sh..."
+    /home/ec2-user/scripts/setup-ec2.sh
+else
+    echo "Running inline setup (fallback)..."
+    # Fallback: Run setup inline if S3 download fails
+    yum update -y
+    yum install -y docker jq nginx
+    systemctl start docker
+    systemctl enable docker
+    usermod -aG docker ec2-user
+    
+    # Install AWS CLI v2 if not present
+    if ! command -v aws &> /dev/null; then
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/awscliv2.zip
+        unzip /tmp/awscliv2.zip -d /tmp
+        /tmp/aws/install
+        rm -rf /tmp/aws /tmp/awscliv2.zip
+    fi
+    
+    # Setup .env from Parameter Store
+    if aws ssm get-parameter --name /golink-shorner/db/host --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null > /dev/null; then
+        DB_HOST=$(aws ssm get-parameter --name /golink-shorner/db/host --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+        DB_PORT=$(aws ssm get-parameter --name /golink-shorner/db/port --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "5432")
+        DB_USER=$(aws ssm get-parameter --name /golink-shorner/db/user --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney")
+        DB_PASSWORD=$(aws ssm get-parameter --name /golink-shorner/db/password --with-decryption --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+        DB_NAME=$(aws ssm get-parameter --name /golink-shorner/db/name --region ap-southeast-1 --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney_link")
+        
+        cat > /home/ec2-user/.env << EOF
+DB_HOST=${DB_HOST}
+DB_PORT=${DB_PORT}
+DB_USER=${DB_USER}
+DB_PASSWORD=${DB_PASSWORD}
+DB_NAME=${DB_NAME}
+DB_SSLMODE=require
+EOF
+        chmod 600 /home/ec2-user/.env
+    fi
+    
+    # Configure nginx
+    tee /etc/nginx/conf.d/golink-shorner.conf > /dev/null <<'NGINXEOF'
+upstream golink_shorner {
+    server localhost:3000;
+    keepalive 32;
+}
+server {
+    listen 80;
+    server_name _;
+    location /health {
+        proxy_pass http://golink_shorner/health;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        access_log off;
+    }
+    location / {
+        proxy_pass http://golink_shorner;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+NGINXEOF
+    nginx -t
+    systemctl enable nginx
+    systemctl start nginx
 fi
 
-# Install jq
-yum install -y jq
+# Download deploy script from S3
+echo "Downloading deploy.sh from S3..."
+aws s3 cp s3://onjourney-asset-bucket/scripts/deploy.sh /home/ec2-user/scripts/deploy.sh 2>/dev/null && \
+    chmod +x /home/ec2-user/scripts/deploy.sh || \
+    echo "⚠️  Failed to download deploy.sh (will be downloaded during deployment)"
 
-# Install nginx for reverse proxy (port 80 → 3000)
-yum install -y nginx
+echo "User data script completed successfully"
+```
+
+**Opsi 2: Include Setup Langsung di User Data (Alternative)**
+
+Jika ingin semua setup langsung di User Data tanpa download dari S3:
 
 # Note: curl-minimal is already installed on Amazon Linux 2023
 # No need to install curl separately - curl-minimal is sufficient for our needs
@@ -1566,4 +1664,60 @@ Jika ada masalah, check:
 ---
 
 **Selamat! Setup selesai. Aplikasi Anda sekarang berjalan di AWS dengan CI/CD otomatis! 🚀**
+
+
+#### Generate User Data Script (Helper Script):
+
+Untuk generate User Data script dengan mudah:
+
+```bash
+# Generate User Data script
+chmod +x scripts/generate-user-data.sh
+./scripts/generate-user-data.sh [s3-bucket] [region]
+
+# Contoh:
+./scripts/generate-user-data.sh onjourney-asset-bucket ap-southeast-1 > user-data-script.sh
+
+# Copy output ke Launch Template User Data field
+```
+
+**Atau copy langsung dari section di atas (Opsi 1 - Recommended).**
+
+---
+
+#### Update Launch Template User Data:
+
+**Via AWS Console:**
+1. Buka **EC2 Console** → **Launch Templates**
+2. Pilih Launch Template `onjourney-golink-shortner` (ID: `lt-02dc4a959747d21b5`)
+3. Klik **Actions** → **Modify template (Create new version)**
+4. Scroll ke bagian **Advanced details**
+5. Paste User Data script ke field **User data**
+6. Klik **Create template version**
+7. Set sebagai **Default version** jika perlu
+
+**Via AWS CLI:**
+```bash
+# Generate User Data script
+./scripts/generate-user-data.sh onjourney-asset-bucket ap-southeast-1 > user-data.txt
+
+# Update Launch Template
+aws ec2 create-launch-template-version \
+    --launch-template-id lt-02dc4a959747d21b5 \
+    --launch-template-data file://user-data.txt \
+    --source-version 1 \
+    --region ap-southeast-1
+```
+
+**⚠️ Important:**
+- Pastikan script `setup-ec2.sh` sudah di-upload ke S3 sebelum instance di-launch
+- Pastikan IAM role `EC2RoleForSSM` memiliki S3 read permissions untuk bucket `onjourney-asset-bucket`
+- User Data script akan berjalan saat instance pertama kali di-launch (hanya sekali)
+- Maximum execution time: 10 minutes (untuk Amazon Linux)
+
+**Verification setelah instance di-launch:**
+```bash
+# Verify setup via SSM
+./scripts/verify-instance-setup.sh <instance-id>
+```
 
