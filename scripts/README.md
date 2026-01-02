@@ -49,6 +49,60 @@ export ALB_NAME="onjourney-golink-shortner-alb"
 
 ---
 
+### `check-deployment-status.sh` ⭐ NEW
+
+**Purpose:** Check deployment status and diagnose 504 Gateway Timeout issues
+
+**Usage:**
+```bash
+# From your local machine (with AWS CLI configured)
+chmod +x scripts/check-deployment-status.sh
+./scripts/check-deployment-status.sh
+```
+
+**What it checks:**
+1. ASG instances status
+2. Target Group health (healthy/unhealthy targets)
+3. ALB configuration and state
+4. ALB listeners
+5. ALB health endpoint test
+6. Domain health endpoint test
+7. Security group rules
+8. Target Group configuration
+9. **Instance diagnostics via SSM:**
+   - Container status
+   - Nginx status
+   - Application health (port 3000)
+   - Nginx health (port 80)
+   - Container logs
+   - Nginx logs
+   - Port listeners
+   - .env file
+
+**Common Issues Detected:**
+- ❌ No healthy targets → 504 Gateway Timeout
+- ❌ Nginx not running
+- ❌ Container not running
+- ❌ Security group blocking traffic
+- ❌ Application not responding
+
+**Example Output:**
+```
+❌ No healthy targets in Target Group!
+→ This causes 504 Gateway Timeout
+
+Common causes:
+  1. Nginx not running on instances
+  2. Application container not running
+  3. Security group blocking traffic
+```
+
+**Requirements:**
+- AWS CLI configured
+- IAM permissions: `elbv2:Describe*`, `autoscaling:Describe*`, `ec2:Describe*`, `ssm:SendCommand`, `ssm:GetCommandInvocation`
+
+---
+
 ### `validate-alb-config.sh` ⭐ NEW
 
 **Purpose:** Validate ALB, Target Group, and ASG configuration to diagnose why instances are not appearing

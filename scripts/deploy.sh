@@ -120,26 +120,60 @@ docker run -d \
 echo "Waiting for container to start..."
 sleep 5
 
+# Ensure nginx is running and reloaded
+echo "Ensuring nginx is running..."
+if ! sudo systemctl is-active --quiet nginx; then
+    echo "Starting nginx..."
+    sudo systemctl start nginx
+    sudo systemctl enable nginx
+else
+    echo "Reloading nginx configuration..."
+    sudo systemctl reload nginx || sudo systemctl restart nginx
+fi
+
+# Verify nginx is running
+if ! sudo systemctl is-active --quiet nginx; then
+    echo "⚠️  Warning: nginx failed to start. Checking status..."
+    sudo systemctl status nginx --no-pager | head -10
+    echo "⚠️  Continuing deployment, but nginx may need manual intervention"
+else
+    echo "✅ Nginx is running"
+fi
+
 # Health check
 echo "Performing health check..."
-MAX_RETRIES=5
+MAX_RETRIES=10
 RETRY_COUNT=0
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if curl -f http://localhost:$PORT/health > /dev/null 2>&1; then
-        echo "=========================================="
-        echo "✅ Deployment successful!"
-        echo "=========================================="
-        echo "Container: $CONTAINER_NAME"
-        echo "Image: $FULL_IMAGE"
-        echo "Port: $PORT"
-        echo "Health check: OK"
-        exit 0
+    # First check direct app (port 3000)
+    if curl -f -s http://localhost:$PORT/health > /dev/null 2>&1; then
+        echo "✅ Application health check passed (port $PORT)"
+        
+        # Then check via nginx (port 80)
+        if curl -f -s http://localhost/health > /dev/null 2>&1; then
+            echo "✅ Nginx health check passed (port 80)"
+            echo "=========================================="
+            echo "✅ Deployment successful!"
+            echo "=========================================="
+            echo "Container: $CONTAINER_NAME"
+            echo "Image: $FULL_IMAGE"
+            echo "Port: $PORT"
+            echo "Health check: OK (both app and nginx)"
+            exit 0
+        else
+            echo "⚠️  Application OK but nginx not responding on port 80"
+            echo "   Checking nginx status..."
+            sudo systemctl status nginx --no-pager | head -5
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "   Retrying nginx health check... ($RETRY_COUNT/$MAX_RETRIES)"
+            sleep 3
+        fi
+    else
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        echo "Health check failed, retrying... ($RETRY_COUNT/$MAX_RETRIES)"
+        sleep 3
     fi
-    
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    echo "Health check failed, retrying... ($RETRY_COUNT/$MAX_RETRIES)"
-    sleep 3
 done
 
 echo "=========================================="
@@ -147,5 +181,11 @@ echo "❌ Deployment failed - Health check timeout"
 echo "=========================================="
 echo "Checking container logs..."
 docker logs $CONTAINER_NAME --tail 50
+echo ""
+echo "Checking nginx status..."
+sudo systemctl status nginx --no-pager | head -10
+echo ""
+echo "Checking nginx error logs..."
+sudo tail -20 /var/log/nginx/error.log 2>/dev/null || echo "No nginx error logs"
 exit 1
 
