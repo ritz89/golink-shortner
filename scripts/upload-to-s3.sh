@@ -51,6 +51,15 @@ if [ -f "$SCRIPT_DIR/deploy-asg.sh" ]; then
         --content-type "text/x-shellscript"
 fi
 
+# Upload nginx reverse proxy setup script
+if [ -f "$SCRIPT_DIR/setup-nginx-reverse-proxy.sh" ]; then
+    echo "Uploading setup-nginx-reverse-proxy.sh..."
+    aws s3 cp "$SCRIPT_DIR/setup-nginx-reverse-proxy.sh" \
+        "s3://$BUCKET_NAME/scripts/setup-nginx-reverse-proxy.sh" \
+        --region "$REGION" \
+        --content-type "text/x-shellscript"
+fi
+
 echo "=========================================="
 echo "✅ Scripts uploaded successfully!"
 echo "=========================================="
@@ -59,8 +68,10 @@ echo "S3 URLs:"
 echo "  - Setup script: s3://$BUCKET_NAME/scripts/setup-ec2.sh"
 echo "  - Deploy script: s3://$BUCKET_NAME/scripts/deploy.sh"
 echo "  - Deploy ASG script: s3://$BUCKET_NAME/scripts/deploy-asg.sh"
+echo "  - Nginx setup script: s3://$BUCKET_NAME/scripts/setup-nginx-reverse-proxy.sh"
 echo ""
 echo "To download on EC2 instance:"
 echo "  aws s3 cp s3://$BUCKET_NAME/scripts/setup-ec2.sh /tmp/setup-ec2.sh"
+echo "  aws s3 cp s3://$BUCKET_NAME/scripts/setup-nginx-reverse-proxy.sh /tmp/setup-nginx-reverse-proxy.sh"
 echo ""
 

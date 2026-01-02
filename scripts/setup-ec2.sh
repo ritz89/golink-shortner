@@ -32,6 +32,10 @@ fi
 echo "Installing jq..."
 sudo yum install -y jq
 
+# Install nginx for reverse proxy (port 80 → 3000)
+echo "Installing nginx..."
+sudo yum install -y nginx
+
 # curl-minimal is already installed by default on Amazon Linux 2023
 # No need to install curl separately, curl-minimal is sufficient
 # If you need full curl features, use: sudo yum install -y curl --allowerasing
