@@ -284,6 +284,41 @@ Returns:
 - Configure proper CORS settings if needed
 - Rate limiting helps prevent abuse but should be tuned per use case
 
+## Deployment
+
+### AWS Deployment
+
+Untuk deployment ke AWS menggunakan EC2 (ARM/Graviton) dengan Auto Scaling Group dan CI/CD GitHub Actions, lihat dokumentasi lengkap di:
+
+📖 **[AWS Setup Guide](docs/AWS_SETUP.md)** - Panduan lengkap setup AWS  
+📖 **[Quick Start Guide](docs/QUICK_START.md)** - Setup cepat dalam 15 menit  
+📖 **[Auto Scaling Guide](docs/AUTO_SCALING.md)** - Konfigurasi ASG dan ALB
+
+**Architecture:**
+- Application Load Balancer (ALB)
+- Auto Scaling Group (Min: 1, Max: 2 instances)
+- RDS PostgreSQL (db.t4g.micro)
+- ECR untuk Docker images
+- GitHub Actions untuk CI/CD
+
+Quick start:
+1. Setup ECR repository
+2. Setup RDS PostgreSQL
+3. Setup Application Load Balancer
+4. Setup Auto Scaling Group (min 1, max 2)
+5. Configure GitHub Actions secrets
+6. Push to `main` branch untuk auto-deploy ke semua instances
+
+### Local Development
+
+```bash
+# Run with Air (hot reload)
+air
+
+# Or run directly
+go run app.go
+```
+
 ## License
 
 Copyright (c) 2024 On-journey. All Rights Reserved.
