@@ -123,6 +123,15 @@ sleep 5
 # Ensure nginx is configured and running
 echo "Ensuring nginx is configured and running..."
 
+# Check if nginx is installed, install if not
+if ! command -v nginx &> /dev/null; then
+    echo "Nginx not found, installing..."
+    sudo yum install -y nginx || {
+        echo "❌ ERROR: Failed to install nginx"
+        exit 1
+    }
+fi
+
 # Disable default nginx server block to avoid conflicts
 if [ -f /etc/nginx/conf.d/default.conf ]; then
     echo "Disabling default nginx server block..."
@@ -131,7 +140,7 @@ fi
 
 # Always recreate nginx config to ensure it's correct
 echo "Creating/updating nginx reverse proxy configuration..."
-sudo tee /etc/nginx/conf.d/golink-shorner.conf > /dev/null <<'NGINXEOF'
+if ! sudo tee /etc/nginx/conf.d/golink-shorner.conf > /dev/null <<'NGINXEOF'
 upstream golink_shorner {
     server localhost:3000;
     keepalive 32;
@@ -169,7 +178,24 @@ server {
     }
 }
 NGINXEOF
-echo "✅ Nginx config created/updated"
+then
+    echo "❌ ERROR: Failed to create nginx configuration file"
+    exit 1
+fi
+
+# Verify config file was created and has content
+NGINX_CONFIG="/etc/nginx/conf.d/golink-shorner.conf"
+if [ ! -f "$NGINX_CONFIG" ]; then
+    echo "❌ ERROR: Nginx configuration file was not created: $NGINX_CONFIG"
+    exit 1
+fi
+
+if [ ! -s "$NGINX_CONFIG" ]; then
+    echo "❌ ERROR: Nginx configuration file is empty: $NGINX_CONFIG"
+    exit 1
+fi
+
+echo "✅ Nginx config created/updated (file size: $(wc -c < "$NGINX_CONFIG") bytes)"
 
 # Test nginx configuration
 echo "Testing nginx configuration..."
@@ -182,8 +208,14 @@ fi
 
 # Restart nginx (not reload) to ensure all changes are applied
 echo "Restarting nginx to apply configuration..."
-sudo systemctl restart nginx
-sudo systemctl enable nginx
+if ! sudo systemctl restart nginx; then
+    echo "❌ ERROR: Failed to restart nginx"
+    echo "Checking nginx status and logs..."
+    sudo systemctl status nginx --no-pager | head -20
+    sudo journalctl -u nginx --no-pager -n 20 || true
+    exit 1
+fi
+sudo systemctl enable nginx || true
 
 # Verify nginx is running
 if ! systemctl is-active nginx > /dev/null 2>&1; then
