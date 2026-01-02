@@ -60,8 +60,8 @@ aws ec2 describe-security-groups \
     --output table || echo "   Could not retrieve rules"
 echo ""
 
-# 3. Check Target Group health check configuration
-echo "3. Checking Target Group Configuration..."
+# 3. Fix Target Group health check protocol (HTTPS -> HTTP)
+echo "3. Fixing Target Group Health Check Protocol..."
 TG_NAME="onjourney-golink-shortner-tg"
 TG_ARN=$(aws elbv2 describe-target-groups \
     --names "$TG_NAME" \
@@ -71,6 +71,39 @@ TG_ARN=$(aws elbv2 describe-target-groups \
 
 if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
     echo "   Target Group: $TG_NAME"
+    
+    # Check current health check protocol
+    CURRENT_PROTOCOL=$(aws elbv2 describe-target-groups \
+        --target-group-arns "$TG_ARN" \
+        --region "$AWS_REGION" \
+        --query 'TargetGroups[0].HealthCheckProtocol' \
+        --output text 2>/dev/null || echo "")
+    
+    echo "   Current Health Check Protocol: $CURRENT_PROTOCOL"
+    
+    if [ "$CURRENT_PROTOCOL" == "HTTPS" ]; then
+        echo "   [ERROR] Health check protocol is HTTPS, but application only serves HTTP"
+        echo "   Changing health check protocol to HTTP..."
+        
+        aws elbv2 modify-target-group \
+            --target-group-arn "$TG_ARN" \
+            --health-check-protocol HTTP \
+            --region "$AWS_REGION" \
+            --output text > /dev/null
+        
+        if [ $? -eq 0 ]; then
+            echo "   [OK] Successfully changed health check protocol to HTTP"
+        else
+            echo "   [ERROR] Failed to change health check protocol"
+            exit 1
+        fi
+    elif [ "$CURRENT_PROTOCOL" == "HTTP" ]; then
+        echo "   [OK] Health check protocol is already HTTP (correct)"
+    else
+        echo "   [WARN] Unknown health check protocol: $CURRENT_PROTOCOL"
+    fi
+    
+    # Display current configuration
     echo "   Health Check Path: $(aws elbv2 describe-target-groups \
         --target-group-arns "$TG_ARN" \
         --region "$AWS_REGION" \
@@ -81,9 +114,9 @@ if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
         --region "$AWS_REGION" \
         --query 'TargetGroups[0].HealthCheckPort' \
         --output text)"
-    echo "   ✅ Target Group configuration looks correct"
 else
-    echo "   ⚠️  Could not retrieve Target Group configuration"
+    echo "   [ERROR] Could not retrieve Target Group ARN"
+    exit 1
 fi
 echo ""
 
@@ -93,15 +126,18 @@ echo "Infrastructure Fix Summary"
 echo "=========================================="
 echo ""
 echo "✅ Security Group: HTTP (80) rule added/verified"
+echo "✅ Target Group: Health check protocol fixed (HTTPS -> HTTP)"
 echo ""
 echo "Next Steps:"
 echo "1. Deploy application to all instances:"
 echo "   - Trigger GitHub Actions deployment"
 echo "   - Or run: ./scripts/deploy-asg.sh"
 echo ""
-echo "2. Verify deployment:"
+echo "2. Wait for health checks to pass (may take 1-2 minutes)"
+echo ""
+echo "3. Verify deployment:"
 echo "   ./scripts/check-deployment-status.sh"
 echo ""
-echo "3. Check Target Group health (should show healthy targets)"
+echo "4. Check Target Group health (should show healthy targets)"
 echo ""
 

@@ -62,6 +62,46 @@ TG_HEALTH=$(aws elbv2 describe-target-health \
 echo "$TG_HEALTH"
 echo ""
 
+# Get detailed Target Group health check configuration
+echo "   Target Group Health Check Configuration:"
+TG_HC_CONFIG=$(aws elbv2 describe-target-groups \
+    --target-group-arns "$TG_ARN" \
+    --region $AWS_REGION \
+    --query 'TargetGroups[0].[HealthCheckProtocol,HealthCheckPort,HealthCheckPath,HealthCheckIntervalSeconds,HealthCheckTimeoutSeconds,HealthyThresholdCount,UnhealthyThresholdCount]' \
+    --output text 2>/dev/null)
+
+if [ -n "$TG_HC_CONFIG" ]; then
+    echo "   Protocol: $(echo $TG_HC_CONFIG | awk '{print $1}')"
+    echo "   Port: $(echo $TG_HC_CONFIG | awk '{print $2}')"
+    echo "   Path: $(echo $TG_HC_CONFIG | awk '{print $3}')"
+    echo "   Interval: $(echo $TG_HC_CONFIG | awk '{print $4}')s"
+    echo "   Timeout: $(echo $TG_HC_CONFIG | awk '{print $5}')s"
+    echo "   Healthy Threshold: $(echo $TG_HC_CONFIG | awk '{print $6}')"
+    echo "   Unhealthy Threshold: $(echo $TG_HC_CONFIG | awk '{print $7}')"
+else
+    echo "   ⚠️  Could not retrieve health check configuration"
+fi
+echo ""
+
+# Get detailed health status for each target
+echo "   Detailed Target Health Status:"
+for INSTANCE_ID in $ASG_INSTANCES; do
+    TARGET_HEALTH=$(aws elbv2 describe-target-health \
+        --target-group-arn "$TG_ARN" \
+        --targets "Id=$INSTANCE_ID" \
+        --region $AWS_REGION \
+        --query 'TargetHealthDescriptions[0].[TargetHealth.State,TargetHealth.Reason,TargetHealth.Description]' \
+        --output text 2>/dev/null || echo "Unknown Unknown Unknown")
+    
+    if [ -n "$TARGET_HEALTH" ] && [ "$TARGET_HEALTH" != "None" ]; then
+        STATE=$(echo $TARGET_HEALTH | awk '{print $1}')
+        REASON=$(echo $TARGET_HEALTH | awk '{print $2}')
+        DESC=$(echo $TARGET_HEALTH | awk '{for(i=3;i<=NF;i++) printf "%s ", $i; print ""}')
+        echo "   $INSTANCE_ID: $STATE ($REASON: $DESC)"
+    fi
+done
+echo ""
+
 # Check if any targets are healthy
 HEALTHY_COUNT=$(aws elbv2 describe-target-health \
     --target-group-arn "$TG_ARN" \
@@ -120,7 +160,25 @@ echo "=== Application Health Check (direct port 3000) ==="
 curl -s -m 5 http://localhost:3000/health || echo "App not responding on port 3000"
 echo ""
 echo "=== Nginx Health Check (port 80) ==="
-curl -s -m 5 http://localhost/health || echo "Nginx not responding on port 80"
+NGINX_HEALTH=$(curl -s -m 5 http://localhost/health 2>&1)
+if [ $? -eq 0 ] && echo "$NGINX_HEALTH" | grep -q "status"; then
+    echo "$NGINX_HEALTH"
+else
+    echo "Nginx not responding on port 80"
+    echo "Response: $NGINX_HEALTH"
+fi
+echo ""
+
+echo "=== Testing Health Check from ALB Perspective ==="
+# Simulate ALB health check (from instance's private IP)
+INSTANCE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4 2>/dev/null || echo "")
+if [ -n "$INSTANCE_IP" ]; then
+    echo "Instance private IP: $INSTANCE_IP"
+    echo "Testing health check endpoint from localhost (simulating ALB):"
+    curl -s -m 5 -H "Host: localhost" http://localhost/health || echo "Failed"
+else
+    echo "Could not retrieve instance IP"
+fi
 echo ""
 echo "=== Container Logs (last 30 lines) ==="
 docker logs golink-shorner --tail 30 2>&1 || echo "Cannot get logs"
@@ -272,40 +330,65 @@ echo ""
 # 6. Test ALB Health Endpoint
 echo "5. Testing ALB Health Endpoint..."
 if [ -n "$ALB_DNS" ]; then
-    echo "   Testing: http://$ALB_DNS/health"
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://$ALB_DNS/health" 2>/dev/null || echo "000")
+    echo "   Testing HTTPS (443): https://$ALB_DNS/health"
+    HTTPS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -k "https://$ALB_DNS/health" 2>/dev/null || echo "000")
     
-    if [ "$HTTP_CODE" == "200" ]; then
-        echo "   ✅ ALB health check: OK (HTTP $HTTP_CODE)"
-        RESPONSE=$(curl -s --max-time 10 "http://$ALB_DNS/health" 2>/dev/null || echo "")
+    if [ "$HTTPS_CODE" == "200" ]; then
+        echo "   ✅ ALB health check (HTTPS): HTTP $HTTPS_CODE"
+        RESPONSE=$(curl -s --max-time 10 -k "https://$ALB_DNS/health" 2>/dev/null || echo "")
         echo "   Response: $RESPONSE"
-    elif [ "$HTTP_CODE" == "504" ]; then
-        echo "   ❌ ALB health check: Gateway Timeout (HTTP $HTTP_CODE)"
-        echo "   → This confirms the 504 error"
-    elif [ "$HTTP_CODE" == "000" ]; then
-        echo "   ❌ ALB health check: Connection failed"
+        HTTP_CODE="$HTTPS_CODE"
+    elif [ "$HTTPS_CODE" == "000" ]; then
+        echo "   ⚠️  HTTPS failed, trying HTTP (80)..."
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://$ALB_DNS/health" 2>/dev/null || echo "000")
+        if [ "$HTTP_CODE" == "200" ]; then
+            echo "   ✅ ALB health check (HTTP): HTTP $HTTP_CODE"
+            RESPONSE=$(curl -s --max-time 10 "http://$ALB_DNS/health" 2>/dev/null || echo "")
+            echo "   Response: $RESPONSE"
+        elif [ "$HTTP_CODE" == "301" ] || [ "$HTTP_CODE" == "302" ]; then
+            echo "   ⚠️  ALB health check (HTTP): HTTP $HTTP_CODE (redirect to HTTPS)"
+        elif [ "$HTTP_CODE" == "504" ]; then
+            echo "   ❌ ALB health check: Gateway Timeout (HTTP $HTTP_CODE)"
+            echo "   → This confirms the 504 error"
+        else
+            echo "   ❌ ALB health check: HTTP $HTTP_CODE"
+        fi
     else
-        echo "   ⚠️  ALB health check: HTTP $HTTP_CODE"
+        echo "   ⚠️  ALB health check (HTTPS): HTTP $HTTPS_CODE"
+        HTTP_CODE="$HTTPS_CODE"
     fi
 else
     echo "   ⚠️  Cannot test - ALB DNS not found"
+    HTTP_CODE="000"
 fi
 echo ""
 
 # 7. Test Domain
 echo "6. Testing Domain: $DOMAIN..."
 if [ -n "$DOMAIN" ]; then
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://$DOMAIN/health" 2>/dev/null || echo "000")
+    HTTPS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "https://$DOMAIN/health" 2>/dev/null || echo "000")
     
-    if [ "$HTTP_CODE" == "200" ]; then
-        echo "   ✅ Domain health check: OK (HTTP $HTTP_CODE)"
-    elif [ "$HTTP_CODE" == "504" ]; then
-        echo "   ❌ Domain health check: Gateway Timeout (HTTP $HTTP_CODE)"
-    elif [ "$HTTP_CODE" == "000" ]; then
-        echo "   ⚠️  Domain health check: Connection failed (DNS may not be configured)"
+    if [ "$HTTPS_CODE" == "200" ]; then
+        echo "   ✅ Domain health check (HTTPS): HTTP $HTTPS_CODE"
+    elif [ "$HTTPS_CODE" == "000" ]; then
+        echo "   ⚠️  HTTPS failed, trying HTTP..."
+        HTTP_CODE_DOMAIN=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://$DOMAIN/health" 2>/dev/null || echo "000")
+        if [ "$HTTP_CODE_DOMAIN" == "200" ]; then
+            echo "   ✅ Domain health check (HTTP): HTTP $HTTP_CODE_DOMAIN"
+        elif [ "$HTTP_CODE_DOMAIN" == "301" ] || [ "$HTTP_CODE_DOMAIN" == "302" ]; then
+            echo "   ⚠️  Domain health check (HTTP): HTTP $HTTP_CODE_DOMAIN (redirect to HTTPS)"
+        elif [ "$HTTP_CODE_DOMAIN" == "504" ]; then
+            echo "   ❌ Domain health check: Gateway Timeout (HTTP $HTTP_CODE_DOMAIN)"
+        elif [ "$HTTP_CODE_DOMAIN" == "000" ]; then
+            echo "   ⚠️  Domain health check: Connection failed (DNS may not be configured)"
+        else
+            echo "   ⚠️  Domain health check: HTTP $HTTP_CODE_DOMAIN"
+        fi
     else
-        echo "   ⚠️  Domain health check: HTTP $HTTP_CODE"
+        echo "   ⚠️  Domain health check (HTTPS): HTTP $HTTPS_CODE"
     fi
+else
+    echo "   ⚠️  Domain not configured"
 fi
 echo ""
 
