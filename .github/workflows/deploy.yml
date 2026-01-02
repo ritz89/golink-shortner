@@ -182,18 +182,6 @@ jobs:
               python3 -c "import json, sys; json.dump({'commands': [sys.argv[1]]}, sys.stdout)" "$DEPLOY_COMMANDS" > "$PARAMS_FILE"
             fi
             
-            # Debug: Show the deployment command
-            echo "=========================================="
-            echo "Deployment Command:"
-            echo "=========================================="
-            echo "$DEPLOY_COMMANDS"
-            echo "=========================================="
-            echo "This command will:"
-            echo "  1. Download deploy.sh from S3"
-            echo "  2. Set required environment variables"
-            echo "  3. Execute deploy.sh script"
-            echo "=========================================="
-            
             # Send command via SSM (with retry logic for InvalidInstanceId errors)
             COMMAND_ID=""
             MAX_RETRIES=3
@@ -260,30 +248,6 @@ jobs:
             fi
             
             echo "Command ID: $COMMAND_ID"
-            
-            # Debug: Show command structure before execution
-            echo "=========================================="
-            echo "DEBUG: Command structure (first 500 chars):"
-            echo "=========================================="
-            echo "$DEPLOY_COMMANDS" | head -c 500
-            echo ""
-            echo "=========================================="
-            echo "DEBUG: Syntax check..."
-            echo "=========================================="
-            if echo "$DEPLOY_COMMANDS" | grep -q '&& ;'; then
-              echo "❌ WARNING: Found '&& ;' pattern in command!"
-            else
-              echo "✅ No '&& ;' pattern found"
-            fi
-            if echo "$DEPLOY_COMMANDS" | grep -q 'fi && ; fi'; then
-              echo "❌ WARNING: Found 'fi && ; fi' pattern in command!"
-            else
-              echo "✅ No 'fi && ; fi' pattern found"
-            fi
-            echo "DEBUG: Nginx command area:"
-            echo "$DEPLOY_COMMANDS" | grep -o 'Ensuring nginx.*Performing health check' | head -c 300 || echo "Could not extract nginx area"
-            echo ""
-            echo "=========================================="
             echo "Waiting for command to complete..."
             
             # Wait for command to complete (max 5 minutes)
@@ -314,49 +278,26 @@ jobs:
               elif [ "$STATUS" == "Failed" ] || [ "$STATUS" == "Cancelled" ] || [ "$STATUS" == "TimedOut" ]; then
                 echo "❌ Deployment failed for $INSTANCE_ID (Status: $STATUS)"
                 
-                # Get full command details for debugging
+                # Get command output for debugging
                 echo "=========================================="
-                echo "DEBUG: Full Command Details:"
+                echo "Command Output:"
                 echo "=========================================="
                 aws ssm get-command-invocation \
                   --command-id "$COMMAND_ID" \
                   --instance-id "$INSTANCE_ID" \
                   --region "$AWS_REGION" \
-                  --query '{Status:Status,ResponseCode:ResponseCode,ExecutionStartDateTime:ExecutionStartDateTime,ExecutionEndDateTime:ExecutionEndDateTime}' \
-                  --output json 2>/dev/null || echo "Could not get command details"
-                
-                echo "=========================================="
-                echo "Command Output (Full):"
-                echo "=========================================="
-                OUTPUT=$(aws ssm get-command-invocation \
-                  --command-id "$COMMAND_ID" \
-                  --instance-id "$INSTANCE_ID" \
-                  --region "$AWS_REGION" \
                   --query 'StandardOutputContent' \
-                  --output text 2>/dev/null || echo "No output available")
-                echo "$OUTPUT"
+                  --output text 2>/dev/null || echo "No output available"
                 
                 echo "=========================================="
-                echo "Command Error Output (Full):"
+                echo "Command Error Output:"
                 echo "=========================================="
-                ERROR_OUTPUT=$(aws ssm get-command-invocation \
+                aws ssm get-command-invocation \
                   --command-id "$COMMAND_ID" \
                   --instance-id "$INSTANCE_ID" \
                   --region "$AWS_REGION" \
                   --query 'StandardErrorContent' \
-                  --output text 2>/dev/null || echo "No error output available")
-                echo "$ERROR_OUTPUT"
-                
-                # Check for the specific error
-                if echo "$ERROR_OUTPUT" | grep -q "nginx: invalid option"; then
-                  echo "=========================================="
-                  echo "❌ DETECTED: 'nginx: invalid option' error"
-                  echo "=========================================="
-                  echo "This suggests a command parsing issue."
-                  echo "Checking command structure around nginx..."
-                  echo "$DEPLOY_COMMANDS" | grep -o 'systemctl.*nginx.*Performing' | head -c 300 || echo "Could not extract nginx command area"
-                  echo ""
-                fi
+                  --output text 2>/dev/null || echo "No error output available"
                 
                 echo "=========================================="
                 exit 1
@@ -373,13 +314,21 @@ jobs:
         if: steps.get-instances.outputs.use_asg == 'true'
         run: |
           if [ -n "${{ secrets.ALB_DNS }}" ]; then
-            echo "Checking ALB health..."
+            echo "Checking ALB health via HTTPS (443)..."
             for i in {1..10}; do
-              if curl -f http://${{ secrets.ALB_DNS }}/health; then
-                echo "✅ ALB health check passed"
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -k --max-time 10 "https://${{ secrets.ALB_DNS }}/health" 2>/dev/null || echo "000")
+              if [ "$HTTP_CODE" == "200" ]; then
+                echo "✅ ALB health check passed (HTTPS: HTTP $HTTP_CODE)"
                 exit 0
+              elif [ "$HTTP_CODE" == "000" ]; then
+                echo "⚠️  HTTPS failed, trying HTTP (80)..."
+                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://${{ secrets.ALB_DNS }}/health" 2>/dev/null || echo "000")
+                if [ "$HTTP_CODE" == "200" ]; then
+                  echo "✅ ALB health check passed (HTTP: HTTP $HTTP_CODE)"
+                  exit 0
+                fi
               fi
-              echo "Waiting for ALB... ($i/10)"
+              echo "Waiting for ALB... ($i/10) - HTTP Code: $HTTP_CODE"
               sleep 10
             done
             echo "⚠️  ALB health check timeout (instances may still be starting)"
