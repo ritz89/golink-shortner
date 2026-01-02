@@ -36,6 +36,12 @@ sudo yum install -y jq
 echo "Installing nginx..."
 sudo yum install -y nginx
 
+# Disable default nginx server block to avoid conflicts
+if [ -f /etc/nginx/conf.d/default.conf ]; then
+    echo "Disabling default nginx server block..."
+    sudo mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.disabled 2>/dev/null || true
+fi
+
 # Configure nginx reverse proxy
 echo "Configuring nginx reverse proxy..."
 sudo tee /etc/nginx/conf.d/golink-shorner.conf > /dev/null <<'NGINXEOF'
@@ -45,7 +51,8 @@ upstream golink_shorner {
 }
 
 server {
-    listen 80;
+    listen 80 default_server;
+    listen [::]:80 default_server;
     server_name _;
 
     # Health check endpoint
@@ -80,7 +87,7 @@ NGINXEOF
 echo "Testing nginx configuration..."
 sudo nginx -t
 sudo systemctl enable nginx
-sudo systemctl start nginx
+sudo systemctl restart nginx
 echo "✅ Nginx configured and started"
 
 # curl-minimal is already installed by default on Amazon Linux 2023

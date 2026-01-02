@@ -14,8 +14,14 @@ echo ""
 echo "1. Installing nginx..."
 sudo yum install -y nginx
 
+# Disable default nginx server block to avoid conflicts
+if [ -f /etc/nginx/conf.d/default.conf ]; then
+    echo "2. Disabling default nginx server block..."
+    sudo mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.disabled 2>/dev/null || true
+fi
+
 # Create nginx configuration for reverse proxy
-echo "2. Creating nginx configuration..."
+echo "3. Creating nginx configuration..."
 sudo tee /etc/nginx/conf.d/golink-shorner.conf > /dev/null <<'EOF'
 upstream golink_shorner {
     server localhost:3000;
@@ -23,7 +29,8 @@ upstream golink_shorner {
 }
 
 server {
-    listen 80;
+    listen 80 default_server;
+    listen [::]:80 default_server;
     server_name _;
 
     # Health check endpoint
@@ -59,16 +66,16 @@ server {
 EOF
 
 # Test nginx configuration
-echo "3. Testing nginx configuration..."
+echo "4. Testing nginx configuration..."
 sudo nginx -t
 
 # Enable and start nginx
-echo "4. Starting nginx..."
+echo "5. Starting nginx..."
 sudo systemctl enable nginx
 sudo systemctl restart nginx
 
 # Check nginx status
-echo "5. Checking nginx status..."
+echo "6. Checking nginx status..."
 sudo systemctl status nginx --no-pager | head -10
 
 echo ""

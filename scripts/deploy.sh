@@ -123,17 +123,23 @@ sleep 5
 # Ensure nginx is configured and running
 echo "Ensuring nginx is configured and running..."
 
-# Check if nginx config exists, if not create it
-if [ ! -f /etc/nginx/conf.d/golink-shorner.conf ]; then
-    echo "Nginx config not found, creating it..."
-    sudo tee /etc/nginx/conf.d/golink-shorner.conf > /dev/null <<'NGINXEOF'
+# Disable default nginx server block to avoid conflicts
+if [ -f /etc/nginx/conf.d/default.conf ]; then
+    echo "Disabling default nginx server block..."
+    sudo mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.disabled 2>/dev/null || true
+fi
+
+# Always recreate nginx config to ensure it's correct
+echo "Creating/updating nginx reverse proxy configuration..."
+sudo tee /etc/nginx/conf.d/golink-shorner.conf > /dev/null <<'NGINXEOF'
 upstream golink_shorner {
     server localhost:3000;
     keepalive 32;
 }
 
 server {
-    listen 80;
+    listen 80 default_server;
+    listen [::]:80 default_server;
     server_name _;
 
     # Health check endpoint
@@ -163,8 +169,7 @@ server {
     }
 }
 NGINXEOF
-    echo "✅ Nginx config created"
-fi
+echo "✅ Nginx config created/updated"
 
 # Test nginx configuration
 echo "Testing nginx configuration..."
@@ -175,15 +180,10 @@ if ! sudo nginx -t; then
     exit 1
 fi
 
-# Start or reload nginx
-if ! systemctl is-active nginx > /dev/null 2>&1; then
-    echo "Starting nginx..."
-    sudo systemctl start nginx
-    sudo systemctl enable nginx
-else
-    echo "Reloading nginx configuration..."
-    sudo systemctl reload nginx || sudo systemctl restart nginx
-fi
+# Restart nginx (not reload) to ensure all changes are applied
+echo "Restarting nginx to apply configuration..."
+sudo systemctl restart nginx
+sudo systemctl enable nginx
 
 # Verify nginx is running
 if ! systemctl is-active nginx > /dev/null 2>&1; then
