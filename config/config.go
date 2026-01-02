@@ -26,7 +26,7 @@ func Load() {
 		Password: getEnv("DB_PASSWORD", ""),
 		DBName:   getEnv("DB_NAME", "link_shorner"),
 		SSLMode:  getEnv("DB_SSLMODE", "disable"),
-		TimeZone: getEnv("DB_TIMEZONE", "Asia/Jakarta"),
+		TimeZone: getEnv("DB_TIMEZONE", "+07:00"), // UTC+7 (WIB/Asia/Jakarta)
 	}
 
 	// Validate required database config
