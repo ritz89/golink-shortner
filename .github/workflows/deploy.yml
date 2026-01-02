@@ -109,6 +109,64 @@ jobs:
             echo "Deploying to instance: $INSTANCE_ID"
             echo "=========================================="
             
+            # Check instance state and wait for it to be ready
+            echo "Checking instance state..."
+            INSTANCE_STATE=$(aws ec2 describe-instances \
+              --instance-ids "$INSTANCE_ID" \
+              --region "$AWS_REGION" \
+              --query 'Reservations[0].Instances[0].State.Name' \
+              --output text 2>/dev/null || echo "unknown")
+            
+            echo "Instance state: $INSTANCE_STATE"
+            
+            # Wait for instance to be running (max 5 minutes)
+            if [ "$INSTANCE_STATE" != "running" ]; then
+              echo "⚠️  Instance is not running (state: $INSTANCE_STATE), waiting..."
+              for i in {1..30}; do
+                sleep 10
+                INSTANCE_STATE=$(aws ec2 describe-instances \
+                  --instance-ids "$INSTANCE_ID" \
+                  --region "$AWS_REGION" \
+                  --query 'Reservations[0].Instances[0].State.Name' \
+                  --output text 2>/dev/null || echo "unknown")
+                echo "  Attempt $i/30: Instance state is $INSTANCE_STATE"
+                if [ "$INSTANCE_STATE" == "running" ]; then
+                  echo "✅ Instance is now running"
+                  break
+                fi
+              done
+              
+              if [ "$INSTANCE_STATE" != "running" ]; then
+                echo "❌ Instance $INSTANCE_ID is not in running state (current: $INSTANCE_STATE)"
+                echo "   Skipping deployment for this instance"
+                continue
+              fi
+            fi
+            
+            # Wait for SSM agent to be ready (max 3 minutes)
+            echo "Waiting for SSM agent to be ready..."
+            SSM_READY=false
+            for i in {1..18}; do
+              sleep 10
+              # Check if instance is registered with SSM
+              if aws ssm describe-instance-information \
+                --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
+                --region "$AWS_REGION" \
+                --query 'InstanceInformationList[0].PingStatus' \
+                --output text 2>/dev/null | grep -q "Online"; then
+                echo "✅ SSM agent is ready (Online)"
+                SSM_READY=true
+                break
+              fi
+              echo "  Attempt $i/18: SSM agent not ready yet, waiting..."
+            done
+            
+            if [ "$SSM_READY" != "true" ]; then
+              echo "⚠️  SSM agent not ready for instance $INSTANCE_ID"
+              echo "   This might be a new instance. SSM agent typically takes 1-2 minutes to register."
+              echo "   Attempting to send command anyway (might fail if agent is not ready)..."
+            fi
+            
             # Prepare deployment commands
             # Try to download deploy.sh from S3 if not exists, then use it or fallback
             DEPLOY_COMMANDS="export ECR_REGISTRY='$ECR_REGISTRY' && export IMAGE_NAME='$IMAGE_NAME' && export IMAGE_TAG='$IMAGE_TAG' && export AWS_REGION='$AWS_REGION' && mkdir -p /home/ec2-user/scripts && if [ ! -f /home/ec2-user/scripts/deploy.sh ]; then echo 'Downloading deploy.sh from S3...' && aws s3 cp s3://onjourney-asset-bucket/scripts/deploy.sh /home/ec2-user/scripts/deploy.sh 2>/dev/null && chmod +x /home/ec2-user/scripts/deploy.sh || echo 'Failed to download deploy.sh from S3'; fi && if [ -f /home/ec2-user/scripts/deploy.sh ]; then echo 'Using deploy.sh script...' && /home/ec2-user/scripts/deploy.sh; else echo 'Deploy script not found, deploying directly...' && if [ ! -f /home/ec2-user/.env ]; then echo 'ERROR: .env file not found at /home/ec2-user/.env. Please create it with database credentials before deploying.' && exit 1; fi && if ! grep -q '^DB_PASSWORD=' /home/ec2-user/.env || grep -q '^DB_PASSWORD=$' /home/ec2-user/.env || grep -q '^DB_PASSWORD=your_password' /home/ec2-user/.env; then echo 'ERROR: DB_PASSWORD is not set in /home/ec2-user/.env. Please edit the file and set DB_PASSWORD.' && exit 1; fi && aws ecr get-login-password --region \$AWS_REGION | docker login --username AWS --password-stdin \$ECR_REGISTRY && echo 'Pulling image...' && docker pull \$ECR_REGISTRY/\$IMAGE_NAME:\$IMAGE_TAG && echo 'Stopping old container...' && docker stop golink-shorner 2>/dev/null || true && docker rm golink-shorner 2>/dev/null || true && echo 'Starting new container...' && docker run -d --name golink-shorner --restart unless-stopped -p 3000:3000 --env-file /home/ec2-user/.env \$ECR_REGISTRY/\$IMAGE_NAME:\$IMAGE_TAG && echo 'Waiting for container to start...' && sleep 10 && echo 'Checking container status...' && docker ps | grep golink-shorner && echo 'Performing health check...' && for i in {1..10}; do if curl -f http://localhost:3000/health 2>/dev/null; then echo 'Health check passed!' && exit 0; fi; echo \"Health check attempt \$i/10 failed, retrying...\"; sleep 3; done && echo 'Health check failed after 10 attempts' && echo 'Container logs:' && docker logs golink-shorner --tail 50 && exit 1; fi"
@@ -123,22 +181,68 @@ jobs:
               python3 -c "import json, sys; json.dump({'commands': [sys.argv[1]]}, sys.stdout)" "$DEPLOY_COMMANDS" > "$PARAMS_FILE"
             fi
             
-            # Send command via SSM
-            COMMAND_ID=$(aws ssm send-command \
-              --instance-ids "$INSTANCE_ID" \
-              --document-name "AWS-RunShellScript" \
-              --parameters file://"$PARAMS_FILE" \
-              --region "$AWS_REGION" \
-              --output-s3-bucket-name "onjourney-asset-bucket" \
-              --output-s3-key-prefix "ssm-commands" \
-              --query 'Command.CommandId' \
-              --output text)
+            # Send command via SSM (with retry logic for InvalidInstanceId errors)
+            COMMAND_ID=""
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              echo "Sending SSM command (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
+              
+              SSM_OUTPUT=$(aws ssm send-command \
+                --instance-ids "$INSTANCE_ID" \
+                --document-name "AWS-RunShellScript" \
+                --parameters file://"$PARAMS_FILE" \
+                --region "$AWS_REGION" \
+                --output-s3-bucket-name "onjourney-asset-bucket" \
+                --output-s3-key-prefix "ssm-commands" \
+                --query 'Command.CommandId' \
+                --output text 2>&1)
+              
+              # Check if output is a valid command ID (UUID format)
+              if [[ "$SSM_OUTPUT" =~ ^[a-f0-9-]{36}$ ]]; then
+                COMMAND_ID="$SSM_OUTPUT"
+                echo "✅ SSM command sent successfully: $COMMAND_ID"
+                break
+              elif [[ "$SSM_OUTPUT" == *"InvalidInstanceId"* ]] || [[ "$SSM_OUTPUT" == *"not in a valid state"* ]]; then
+                RETRY_COUNT=$((RETRY_COUNT + 1))
+                if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                  echo "⚠️  Instance not ready for SSM (InvalidInstanceId), waiting 30 seconds before retry..."
+                  sleep 30
+                  
+                  # Re-check SSM agent status
+                  SSM_STATUS=$(aws ssm describe-instance-information \
+                    --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
+                    --region "$AWS_REGION" \
+                    --query 'InstanceInformationList[0].PingStatus' \
+                    --output text 2>/dev/null || echo "Unknown")
+                  
+                  if [ "$SSM_STATUS" == "Online" ]; then
+                    echo "✅ SSM agent is now Online, retrying..."
+                  else
+                    echo "⚠️  SSM agent status: $SSM_STATUS (still not ready, but retrying anyway...)"
+                  fi
+                else
+                  echo "❌ Failed to send SSM command after $MAX_RETRIES attempts"
+                  echo "   Error: $SSM_OUTPUT"
+                  echo "   Instance might be too new. SSM agent typically takes 1-2 minutes to register."
+                  echo "   Please wait a few minutes and try deployment again, or deploy manually."
+                  rm -f "$PARAMS_FILE"
+                  continue 2  # Continue to next instance
+                fi
+              else
+                # Other error
+                echo "❌ Failed to send SSM command: $SSM_OUTPUT"
+                rm -f "$PARAMS_FILE"
+                continue 2  # Continue to next instance
+              fi
+            done
             
             # Cleanup temp file
             rm -f "$PARAMS_FILE"
             
-            if [ -z "$COMMAND_ID" ] || [ "$COMMAND_ID" == "None" ]; then
-              echo "❌ Failed to send SSM command to instance $INSTANCE_ID"
+            if [ -z "$COMMAND_ID" ] || [[ ! "$COMMAND_ID" =~ ^[a-f0-9-]{36}$ ]]; then
+              echo "❌ Failed to send SSM command to instance $INSTANCE_ID after retries"
               continue
             fi
             
