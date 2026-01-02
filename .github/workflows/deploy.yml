@@ -1,0 +1,180 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: onjourney-golink-shortner
+  IMAGE_TAG: latest
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.25'
+      
+      - name: Download dependencies
+        run: go mod download
+      
+      - name: Run tests
+        run: go test -v ./...
+
+  build-and-push:
+    name: Build and Push to ECR
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      
+      - name: Build, tag, and push image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_NAME: ${{ env.ECR_REPOSITORY }}
+        run: |
+          # Build for ARM64 (Graviton)
+          docker buildx create --use
+          docker buildx build --platform linux/arm64 \
+            -t $ECR_REGISTRY/$IMAGE_NAME:${{ github.sha }} \
+            -t $ECR_REGISTRY/$IMAGE_NAME:${{ env.IMAGE_TAG }} \
+            --push .
+      
+      - name: Get ASG Instances
+        id: get-instances
+        run: |
+          if [ -n "${{ secrets.ASG_NAME }}" ]; then
+            INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names ${{ secrets.ASG_NAME }} \
+              --region ${{ env.AWS_REGION }} \
+              --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+              --output text)
+            
+            if [ -z "$INSTANCES" ] || [ "$INSTANCES" == "None" ]; then
+              echo "No instances found in ASG: ${{ secrets.ASG_NAME }}"
+              echo "use_asg=false" >> $GITHUB_OUTPUT
+            else
+              echo "Found instances in ASG: $INSTANCES"
+              echo "use_asg=true" >> $GITHUB_OUTPUT
+              # Save instances to file for later use
+              echo "$INSTANCES" | tr ' ' '\n' > instances.txt
+            fi
+          else
+            echo "ASG_NAME not set, using single EC2"
+            echo "use_asg=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Deploy to ASG Instances via SSM
+        if: steps.get-instances.outputs.use_asg == 'true'
+        run: |
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          IMAGE_NAME="${{ env.ECR_REPOSITORY }}"
+          IMAGE_TAG="${{ env.IMAGE_TAG }}"
+          AWS_REGION="${{ env.AWS_REGION }}"
+          
+          while IFS= read -r INSTANCE_ID; do
+            echo "=========================================="
+            echo "Deploying to instance: $INSTANCE_ID"
+            echo "=========================================="
+            
+            # Prepare deployment commands as JSON array
+            DEPLOY_COMMANDS="export ECR_REGISTRY='$ECR_REGISTRY' && export IMAGE_NAME='$IMAGE_NAME' && export IMAGE_TAG='$IMAGE_TAG' && export AWS_REGION='$AWS_REGION' && if [ -f /home/ec2-user/scripts/deploy.sh ]; then /home/ec2-user/scripts/deploy.sh; else echo 'Deploy script not found, deploying directly...' && aws ecr get-login-password --region \$AWS_REGION | docker login --username AWS --password-stdin \$ECR_REGISTRY && docker pull \$ECR_REGISTRY/\$IMAGE_NAME:\$IMAGE_TAG && docker stop golink-shorner 2>/dev/null || true && docker rm golink-shorner 2>/dev/null || true && docker run -d --name golink-shorner --restart unless-stopped -p 3000:3000 --env-file /home/ec2-user/.env \$ECR_REGISTRY/\$IMAGE_NAME:\$IMAGE_TAG && sleep 5 && curl -f http://localhost:3000/health || exit 1; fi"
+            
+            # Send command via SSM
+            COMMAND_ID=$(aws ssm send-command \
+              --instance-ids "$INSTANCE_ID" \
+              --document-name "AWS-RunShellScript" \
+              --parameters "commands=[\"$DEPLOY_COMMANDS\"]" \
+              --region "$AWS_REGION" \
+              --output-s3-bucket-name "onjourney-asset-bucket" \
+              --output-s3-key-prefix "ssm-commands" \
+              --query 'Command.CommandId' \
+              --output text)
+            
+            if [ -z "$COMMAND_ID" ] || [ "$COMMAND_ID" == "None" ]; then
+              echo "❌ Failed to send SSM command to instance $INSTANCE_ID"
+              continue
+            fi
+            
+            echo "Command ID: $COMMAND_ID"
+            echo "Waiting for command to complete..."
+            
+            # Wait for command to complete (max 5 minutes)
+            STATUS="InProgress"
+            for i in {1..30}; do
+              sleep 10
+              STATUS=$(aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" \
+                --instance-id "$INSTANCE_ID" \
+                --region "$AWS_REGION" \
+                --query 'Status' \
+                --output text 2>/dev/null || echo "InProgress")
+              
+              if [ "$STATUS" == "Success" ]; then
+                echo "✅ Deployment successful for $INSTANCE_ID"
+                # Get command output
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$INSTANCE_ID" \
+                  --region "$AWS_REGION" \
+                  --query 'StandardOutputContent' \
+                  --output text
+                break
+              elif [ "$STATUS" == "Failed" ] || [ "$STATUS" == "Cancelled" ] || [ "$STATUS" == "TimedOut" ]; then
+                echo "❌ Deployment failed for $INSTANCE_ID (Status: $STATUS)"
+                # Get error output
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$INSTANCE_ID" \
+                  --region "$AWS_REGION" \
+                  --query 'StandardErrorContent' \
+                  --output text
+                exit 1
+              fi
+            done
+            
+            if [ "$STATUS" != "Success" ]; then
+              echo "❌ Deployment timeout for $INSTANCE_ID (Status: $STATUS)"
+              exit 1
+            fi
+          done < instances.txt
+      
+      - name: Verify ALB Health
+        if: steps.get-instances.outputs.use_asg == 'true'
+        run: |
+          if [ -n "${{ secrets.ALB_DNS }}" ]; then
+            echo "Checking ALB health..."
+            for i in {1..10}; do
+              if curl -f http://${{ secrets.ALB_DNS }}/health; then
+                echo "✅ ALB health check passed"
+                exit 0
+              fi
+              echo "Waiting for ALB... ($i/10)"
+              sleep 10
+            done
+            echo "⚠️  ALB health check timeout (instances may still be starting)"
+          else
+            echo "ALB_DNS not set, skipping ALB health check"
+          fi

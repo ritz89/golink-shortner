@@ -1,37 +1,38 @@
-# Building the binary of the App
-FROM golang:1.25-alpine AS build
-
-# `boilerplate` should be replaced with your project name
-WORKDIR /go/src/boilerplate
-
-# Copy all the Code and stuff to compile everything
-COPY . .
-
-# Downloads all the dependencies in advance (could be left out, but it's more clear this way)
-RUN go mod download
-
-# Builds the application as a staticly linked one, to allow it to run on alpine
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o app .
-
-
-# Moving the binary to the 'final Image' to make it smaller
-FROM alpine:latest as release
+# Build stage
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Create the `public` dir and copy all the assets into it
-RUN mkdir ./static
-COPY ./static ./static
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
 
-# `boilerplate` should be replaced here as well
-COPY --from=build /go/src/boilerplate/app .
+# Copy source code
+COPY . .
 
-# Add packages
-RUN apk -U upgrade \
-    && apk add --no-cache dumb-init ca-certificates \
-    && chmod +x /app/app
+# Build for ARM64 (Graviton)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -a -installsuffix cgo -o app app.go
 
-# Exposes port 3000 because our program listens on that port
+# Runtime stage
+FROM alpine:latest
+
+WORKDIR /app
+
+# Install ca-certificates for HTTPS
+RUN apk --no-cache add ca-certificates dumb-init
+
+# Copy binary and static files
+COPY --from=builder /app/app .
+COPY --from=builder /app/static ./static
+COPY --from=builder /app/views ./views
+COPY --from=builder /app/docs ./docs
+
+# Make binary executable
+RUN chmod +x /app/app
+
+# Expose port
 EXPOSE 3000
 
+# Use dumb-init to handle signals properly
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["./app", "-prod"]
