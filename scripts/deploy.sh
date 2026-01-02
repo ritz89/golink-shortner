@@ -38,23 +38,31 @@ echo "Stopping old container..."
 docker stop $CONTAINER_NAME 2>/dev/null || true
 docker rm $CONTAINER_NAME 2>/dev/null || true
 
-# Check if .env file exists, if not try to retrieve from Parameter Store
-if [ ! -f /home/ec2-user/.env ]; then
-    echo "⚠️  .env file not found, attempting to retrieve from Parameter Store..."
+# Always retrieve credentials from Parameter Store and replace .env file
+echo "Retrieving database credentials from Parameter Store..."
+mkdir -p /home/ec2-user
+
+# Try to retrieve from Parameter Store
+if aws ssm get-parameter --name /golink-shorner/db/host --region $REGION --query 'Parameter.Value' --output text 2>/dev/null > /dev/null; then
+    echo "✅ Parameter Store accessible, retrieving all credentials..."
+    DB_HOST=$(aws ssm get-parameter --name /golink-shorner/db/host --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+    DB_PORT=$(aws ssm get-parameter --name /golink-shorner/db/port --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "5432")
+    DB_USER=$(aws ssm get-parameter --name /golink-shorner/db/user --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney")
+    DB_PASSWORD=$(aws ssm get-parameter --name /golink-shorner/db/password --with-decryption --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+    DB_NAME=$(aws ssm get-parameter --name /golink-shorner/db/name --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney_link")
     
-    # Try to retrieve from Parameter Store
-    if aws ssm get-parameter --name /golink-shorner/db/host --region $REGION --query 'Parameter.Value' --output text 2>/dev/null > /dev/null; then
-        echo "Retrieving database credentials from Parameter Store..."
-        DB_HOST=$(aws ssm get-parameter --name /golink-shorner/db/host --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "")
-        DB_PORT=$(aws ssm get-parameter --name /golink-shorner/db/port --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "5432")
-        DB_USER=$(aws ssm get-parameter --name /golink-shorner/db/user --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney")
-        DB_PASSWORD=$(aws ssm get-parameter --name /golink-shorner/db/password --with-decryption --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "")
-        DB_NAME=$(aws ssm get-parameter --name /golink-shorner/db/name --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "onjourney_link")
-        
-        # Create .env file with retrieved values
-        mkdir -p /home/ec2-user
-        cat > /home/ec2-user/.env << EOF
-# Database Configuration (retrieved from Parameter Store)
+    # Validate required values
+    if [ -z "$DB_HOST" ] || [ -z "$DB_PASSWORD" ]; then
+        echo "❌ ERROR: Failed to retrieve required credentials from Parameter Store"
+        echo "   DB_HOST: ${DB_HOST:-MISSING}"
+        echo "   DB_PASSWORD: ${DB_PASSWORD:+SET}${DB_PASSWORD:-MISSING}"
+        exit 1
+    fi
+    
+    # Always replace .env file with values from Parameter Store
+    echo "Updating .env file with credentials from Parameter Store..."
+    cat > /home/ec2-user/.env << EOF
+# Database Configuration (retrieved from Parameter Store - auto-updated on each deploy)
 DB_HOST=${DB_HOST}
 DB_PORT=${DB_PORT}
 DB_USER=${DB_USER}
@@ -63,44 +71,38 @@ DB_NAME=${DB_NAME}
 DB_SSLMODE=require
 DB_TIMEZONE=Asia/Jakarta
 EOF
-        
-        chmod 600 /home/ec2-user/.env
-        
-        if [ -z "$DB_HOST" ] || [ -z "$DB_PASSWORD" ]; then
-            echo "❌ ERROR: Failed to retrieve credentials from Parameter Store"
-            echo "   Missing DB_HOST or DB_PASSWORD"
-            exit 1
-        else
-            echo "✅ Successfully retrieved credentials from Parameter Store"
-        fi
-    else
-        echo "❌ ERROR: .env file not found and Parameter Store not accessible"
-        echo "Please create .env file with database credentials before deploying."
-        exit 1
-    fi
+    
+    chmod 600 /home/ec2-user/.env
+    
+    echo "✅ Successfully updated .env file from Parameter Store"
+    echo "   DB_HOST: $DB_HOST"
+    echo "   DB_PORT: $DB_PORT"
+    echo "   DB_USER: $DB_USER"
+    echo "   DB_NAME: $DB_NAME"
+    echo "   DB_PASSWORD: [REDACTED]"
+else
+    echo "❌ ERROR: Parameter Store not accessible"
+    echo "Please ensure:"
+    echo "  1. Parameter Store is configured (see docs/AWS_SETUP.md section 6)"
+    echo "  2. IAM role has Parameter Store access (SecretsManagerReadWrite policy)"
+    echo "  3. Parameters exist: /golink-shorner/db/*"
+    exit 1
 fi
 
-# Validate that DB_PASSWORD is set in .env file
-if ! grep -q "^DB_PASSWORD=" /home/ec2-user/.env || grep -q "^DB_PASSWORD=$" /home/ec2-user/.env || grep -q "^DB_PASSWORD=your_password" /home/ec2-user/.env; then
-    echo "⚠️  DB_PASSWORD is not set in .env file, attempting to retrieve from Parameter Store..."
-    
-    # Try to retrieve password from Parameter Store
-    DB_PASSWORD=$(aws ssm get-parameter --name /golink-shorner/db/password --with-decryption --region $REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "")
-    
-    if [ -n "$DB_PASSWORD" ]; then
-        echo "✅ Retrieved DB_PASSWORD from Parameter Store, updating .env file..."
-        # Update DB_PASSWORD in .env file
-        if grep -q "^DB_PASSWORD=" /home/ec2-user/.env; then
-            sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$DB_PASSWORD|" /home/ec2-user/.env
-        else
-            echo "DB_PASSWORD=$DB_PASSWORD" >> /home/ec2-user/.env
-        fi
-        echo "✅ DB_PASSWORD updated in .env file"
-    else
-        echo "❌ ERROR: DB_PASSWORD is not set in /home/ec2-user/.env and could not retrieve from Parameter Store"
-        echo "Please edit /home/ec2-user/.env and set DB_PASSWORD to your actual database password."
-        exit 1
-    fi
+# Verify .env file was created correctly
+if [ ! -f /home/ec2-user/.env ]; then
+    echo "❌ ERROR: .env file was not created"
+    exit 1
+fi
+
+# Validate that all required values are set
+if ! grep -q "^DB_HOST=" /home/ec2-user/.env || \
+   ! grep -q "^DB_PASSWORD=" /home/ec2-user/.env || \
+   grep -q "^DB_PASSWORD=$" /home/ec2-user/.env; then
+    echo "❌ ERROR: .env file is incomplete or invalid"
+    echo "Current .env content:"
+    cat /home/ec2-user/.env | sed 's/DB_PASSWORD=.*/DB_PASSWORD=[REDACTED]/'
+    exit 1
 fi
 
 ENV_FILE_ARG="--env-file /home/ec2-user/.env"
