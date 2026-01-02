@@ -15,6 +15,10 @@ cat << USERDATA
 set -e
 
 # Wait for instance metadata service to be ready
+# IP 169.254.169.254 is AWS EC2 Instance Metadata Service (IMDS)
+# - Link-local address (RFC 3927), only accessible from within the instance
+# - Provides instance metadata (ID, type, IAM role credentials, etc.)
+# - Must be ready before using AWS CLI (which needs IAM role credentials)
 until curl -s http://169.254.169.254/latest/meta-data/instance-id > /dev/null; do
     sleep 1
 done

@@ -2,6 +2,25 @@
 
 Scripts untuk deployment dan maintenance aplikasi golink-shorner di EC2.
 
+## Quick Start - Setup Instance yang Belum di-Setup
+
+Jika instance belum di-setup (file project tidak ada, container tidak jalan):
+
+```bash
+# 1. Pastikan scripts sudah di-upload ke S3
+./scripts/upload-to-s3.sh
+
+# 2. Setup instance via SSM
+./scripts/setup-instance-via-ssm.sh <instance-id> <region> <s3-bucket>
+
+# 3. Verify setup
+./scripts/verify-instance-setup.sh <instance-id>
+
+# 4. Deploy application (via GitHub Actions atau manual)
+```
+
+Lihat `docs/INSTANCE_SETUP_TROUBLESHOOTING.md` untuk detail troubleshooting.
+
 ## Scripts
 
 ### `setup-alb-ssl.sh` ⭐ NEW

@@ -122,7 +122,7 @@ sleep 5
 
 # Ensure nginx is running and reloaded
 echo "Ensuring nginx is running..."
-if ! sudo systemctl is-active --quiet nginx; then
+if ! systemctl is-active nginx > /dev/null 2>&1; then
     echo "Starting nginx..."
     sudo systemctl start nginx
     sudo systemctl enable nginx
@@ -132,7 +132,7 @@ else
 fi
 
 # Verify nginx is running
-if ! sudo systemctl is-active --quiet nginx; then
+if ! systemctl is-active nginx > /dev/null 2>&1; then
     echo "⚠️  Warning: nginx failed to start. Checking status..."
     sudo systemctl status nginx --no-pager | head -10
     echo "⚠️  Continuing deployment, but nginx may need manual intervention"
