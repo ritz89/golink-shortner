@@ -144,7 +144,7 @@ jobs:
             fi
             
             # Wait for SSM agent to be ready (max 3 minutes)
-            echo "Waiting for SSM agent to be ready..."
+            echo "Waiting for SSM agent to be ready...."
             SSM_READY=false
             for i in {1..18}; do
               sleep 10
