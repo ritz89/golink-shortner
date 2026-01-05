@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,7 +31,30 @@ var pool = &connectionPool{
 
 // getConnectionKey generates a unique key for token's RabbitMQ config
 func getConnectionKey(token *models.APIToken) string {
-	return fmt.Sprintf("%s:%d:%s", token.RabbitMQHost, token.RabbitMQPort, token.RabbitMQUser)
+	return fmt.Sprintf("%s:%d:%s:%s", token.RabbitMQHost, token.RabbitMQPort, token.RabbitMQUser, token.RabbitMQVHost)
+}
+
+// buildAMQPURL builds AMQP connection URL from token config
+func buildAMQPURL(token *models.APIToken) string {
+	port := token.RabbitMQPort
+	if port == 0 {
+		port = 5672
+	}
+
+	vhost := token.RabbitMQVHost
+	if vhost == "" {
+		vhost = "/"
+	} else if !strings.HasPrefix(vhost, "/") {
+		vhost = "/" + vhost
+	}
+
+	return fmt.Sprintf("amqp://%s:%s@%s:%d%s",
+		token.RabbitMQUser,
+		token.RabbitMQPassword,
+		token.RabbitMQHost,
+		port,
+		vhost,
+	)
 }
 
 // getOrCreateConnection gets or creates a RabbitMQ connection for the token
@@ -64,17 +88,7 @@ func getOrCreateConnection(token *models.APIToken) (*amqp.Channel, error) {
 	}
 
 	// Build AMQP URL from token config
-	port := token.RabbitMQPort
-	if port == 0 {
-		port = 5672
-	}
-
-	amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
-		token.RabbitMQUser,
-		token.RabbitMQPassword,
-		token.RabbitMQHost,
-		port,
-	)
+	amqpURL := buildAMQPURL(token)
 
 	conn, err := amqp.Dial(amqpURL)
 	if err != nil {
@@ -213,17 +227,7 @@ func TestConnection(token *models.APIToken) error {
 	}
 
 	// Build AMQP URL
-	port := token.RabbitMQPort
-	if port == 0 {
-		port = 5672
-	}
-
-	amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
-		token.RabbitMQUser,
-		token.RabbitMQPassword,
-		token.RabbitMQHost,
-		port,
-	)
+	amqpURL := buildAMQPURL(token)
 
 	// Create connection (with timeout handled by context)
 	done := make(chan error, 1)
@@ -279,17 +283,7 @@ func TestPublish(token *models.APIToken) error {
 	}
 
 	// Build AMQP URL
-	port := token.RabbitMQPort
-	if port == 0 {
-		port = 5672
-	}
-
-	amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
-		token.RabbitMQUser,
-		token.RabbitMQPassword,
-		token.RabbitMQHost,
-		port,
-	)
+	amqpURL := buildAMQPURL(token)
 
 	// Create connection (with timeout handled by goroutine)
 	done := make(chan error, 1)

@@ -17,6 +17,7 @@ type CreateTokenRequest struct {
 	RabbitMQPort     int    `json:"rabbitmq_port"`
 	RabbitMQUser     string `json:"rabbitmq_user"`
 	RabbitMQPassword string `json:"rabbitmq_password"`
+	RabbitMQVHost     string `json:"rabbitmq_vhost"`
 	RabbitMQQueue    string `json:"rabbitmq_queue"`
 	RateLimitSeconds int    `json:"rate_limit_seconds"`
 }
@@ -28,6 +29,7 @@ type UpdateTokenRequest struct {
 	RabbitMQPort     int    `json:"rabbitmq_port"`
 	RabbitMQUser     string `json:"rabbitmq_user"`
 	RabbitMQPassword string `json:"rabbitmq_password"`
+	RabbitMQVHost     string `json:"rabbitmq_vhost"`
 	RabbitMQQueue    string `json:"rabbitmq_queue"`
 	RateLimitSeconds int    `json:"rate_limit_seconds"`
 }
@@ -63,6 +65,7 @@ func CreateToken(c fiber.Ctx) error {
 		RabbitMQPort:     req.RabbitMQPort,
 		RabbitMQUser:     req.RabbitMQUser,
 		RabbitMQPassword: req.RabbitMQPassword,
+		RabbitMQVHost:     req.RabbitMQVHost,
 		RabbitMQQueue:    req.RabbitMQQueue,
 		RateLimitSeconds: req.RateLimitSeconds,
 	}
