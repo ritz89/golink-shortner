@@ -219,6 +219,16 @@ async function loadTokens() {
                 <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
                     <button onclick="editToken(${token.id})" class="text-indigo-600 hover:text-indigo-900">Edit</button>
                     <button onclick="deleteToken(${token.id})" class="text-red-600 hover:text-red-900">Delete</button>
+                    <button onclick="testConnection(${token.id}, this)" 
+                            class="text-green-600 hover:text-green-900" 
+                            title="Test RabbitMQ Connection">
+                        Test Connection
+                    </button>
+                    <button onclick="testPublish(${token.id}, this)" 
+                            class="text-blue-600 hover:text-blue-900" 
+                            title="Test RabbitMQ Publish">
+                        Test Publish
+                    </button>
                 </td>
             </tr>
         `).join('');
@@ -275,6 +285,56 @@ async function deleteToken(id) {
         loadTokens();
     } else {
         alert('Failed to delete token');
+    }
+}
+
+async function testConnection(id, button) {
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Testing...';
+    
+    try {
+        const response = await fetch(`/api/v1/admin/tokens/${id}/test-connection`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('✅ Connection test successful!');
+        } else {
+            alert(`❌ Connection test failed: ${result.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`❌ Connection test failed: ${error.message}`);
+    } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+    }
+}
+
+async function testPublish(id, button) {
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Testing...';
+    
+    try {
+        const response = await fetch(`/api/v1/admin/tokens/${id}/test-publish`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('✅ Publish test successful! Test message sent to queue.');
+        } else {
+            alert(`❌ Publish test failed: ${result.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`❌ Publish test failed: ${error.message}`);
+    } finally {
+        button.disabled = false;
+        button.textContent = originalText;
     }
 }
 

@@ -200,3 +200,186 @@ func Close() {
 		delete(pool.pools, key)
 	}
 }
+
+// TestConnection tests RabbitMQ connection for a token
+// Creates a new connection (not from pool) and closes it after test
+func TestConnection(token *models.APIToken) error {
+	// Validate RabbitMQ config
+	if token.RabbitMQHost == "" {
+		return fmt.Errorf("RabbitMQ host not configured")
+	}
+	if token.RabbitMQUser == "" {
+		return fmt.Errorf("RabbitMQ user not configured")
+	}
+
+	// Build AMQP URL
+	port := token.RabbitMQPort
+	if port == 0 {
+		port = 5672
+	}
+
+	amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
+		token.RabbitMQUser,
+		token.RabbitMQPassword,
+		token.RabbitMQHost,
+		port,
+	)
+
+	// Create connection (with timeout handled by context)
+	done := make(chan error, 1)
+	var conn *amqp.Connection
+	var err error
+
+	go func() {
+		conn, err = amqp.Dial(amqpURL)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+		}
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("connection test timeout after 10 seconds")
+	}
+
+	defer func() {
+		if conn != nil {
+			if err := conn.Close(); err != nil {
+				log.Printf("Failed to close test connection: %v", err)
+			}
+		}
+	}()
+
+	// Test channel creation
+	channel, err := conn.Channel()
+	if err != nil {
+		return fmt.Errorf("failed to open channel: %w", err)
+	}
+	defer func() {
+		if err := channel.Close(); err != nil {
+			log.Printf("Failed to close test channel: %v", err)
+		}
+	}()
+
+	// Connection successful
+	return nil
+}
+
+// TestPublish tests publishing a message to RabbitMQ for a token
+// Creates a new connection (not from pool) and closes it after test
+func TestPublish(token *models.APIToken) error {
+	// Validate RabbitMQ config
+	if token.RabbitMQHost == "" {
+		return fmt.Errorf("RabbitMQ host not configured")
+	}
+	if token.RabbitMQUser == "" {
+		return fmt.Errorf("RabbitMQ user not configured")
+	}
+
+	// Build AMQP URL
+	port := token.RabbitMQPort
+	if port == 0 {
+		port = 5672
+	}
+
+	amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
+		token.RabbitMQUser,
+		token.RabbitMQPassword,
+		token.RabbitMQHost,
+		port,
+	)
+
+	// Create connection (with timeout handled by goroutine)
+	done := make(chan error, 1)
+	var conn *amqp.Connection
+	var err error
+
+	go func() {
+		conn, err = amqp.Dial(amqpURL)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+		}
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("connection test timeout after 10 seconds")
+	}
+
+	defer func() {
+		if conn != nil {
+			if err := conn.Close(); err != nil {
+				log.Printf("Failed to close test connection: %v", err)
+			}
+		}
+	}()
+
+	// Open channel
+	channel, err := conn.Channel()
+	if err != nil {
+		return fmt.Errorf("failed to open channel: %w", err)
+	}
+	defer func() {
+		if err := channel.Close(); err != nil {
+			log.Printf("Failed to close test channel: %v", err)
+		}
+	}()
+
+	// Get queue name
+	queueName := token.RabbitMQQueue
+	if queueName == "" {
+		queueName = "click_events"
+	}
+
+	// Declare queue
+	_, err = channel.QueueDeclare(
+		queueName,
+		true,  // durable
+		false, // delete when unused
+		false, // exclusive
+		false, // no-wait
+		nil,   // arguments
+	)
+	if err != nil {
+		return fmt.Errorf("failed to declare queue: %w", err)
+	}
+
+	// Prepare test message
+	testMessage := map[string]interface{}{
+		"test":      true,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"message":   "Test message from golink-shortener",
+	}
+
+	messageJSON, err := json.Marshal(testMessage)
+	if err != nil {
+		return fmt.Errorf("failed to marshal test message: %w", err)
+	}
+
+	// Publish test message with timeout
+	publishCtx, publishCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer publishCancel()
+
+	err = channel.PublishWithContext(
+		publishCtx,
+		"",        // exchange
+		queueName, // routing key
+		false,     // mandatory
+		false,     // immediate
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        messageJSON,
+		},
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to publish test message: %w", err)
+	}
+
+	// Publish successful
+	return nil
+}

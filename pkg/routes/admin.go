@@ -15,23 +15,25 @@ func SetupAdmin(app *fiber.App) {
 	admin.Get("/links", controllers.LinksPage)
 	admin.Get("/tokens", controllers.TokensPage)
 	admin.Get("/users", controllers.UsersPage)
-	
+
 	// Admin API routes (require authentication)
 	adminAPI := app.Group("/api/v1/admin", middleware.RequireAdminAuth)
-	
+
 	// Links management
 	linksAPI := adminAPI.Group("/links")
 	linksAPI.Get("/", controllers.ListLinks)
 	linksAPI.Post("/", controllers.CreateLink)
 	linksAPI.Put("/:code", controllers.UpdateLink)
 	linksAPI.Delete("/:code", controllers.DeleteLink)
-	
+
 	// API tokens management
 	tokensAPI := adminAPI.Group("/tokens")
 	tokensAPI.Get("/", controllers.ListTokens)
 	tokensAPI.Post("/", controllers.CreateToken)
 	tokensAPI.Put("/:id", controllers.UpdateToken)
 	tokensAPI.Delete("/:id", controllers.DeleteToken)
+	tokensAPI.Post("/:id/test-connection", controllers.TestRabbitMQConnection)
+	tokensAPI.Post("/:id/test-publish", controllers.TestRabbitMQPublish)
 
 	// Admin users management
 	usersAPI := adminAPI.Group("/users")
@@ -46,7 +48,7 @@ func SetupAuth(app *fiber.App) {
 	auth := app.Group("/admin")
 	auth.Post("/login", controllers.Login)
 	auth.Post("/logout", controllers.Logout)
-	
+
 	// Login page (public)
 	app.Get("/admin/login", func(c fiber.Ctx) error {
 		return c.Render("admin/login", fiber.Map{
@@ -54,4 +56,3 @@ func SetupAuth(app *fiber.App) {
 		})
 	})
 }
-

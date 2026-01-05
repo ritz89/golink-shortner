@@ -4,6 +4,7 @@ import (
 	"boilerplate/app/models"
 	"boilerplate/app/queries"
 	"boilerplate/platform/database"
+	"boilerplate/platform/queue"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -179,5 +180,79 @@ func DeleteToken(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Token deleted successfully",
+	})
+}
+
+// TestRabbitMQConnection handles POST /api/v1/admin/tokens/:id/test-connection
+func TestRabbitMQConnection(c fiber.Ctx) error {
+	id := fiber.Params[int](c, "id")
+	if id <= 0 {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid token ID",
+		})
+	}
+
+	db := database.GetDB()
+	tokenQuery := &queries.APITokenQuery{DB: db}
+
+	// Get token from database
+	token, err := tokenQuery.GetByID(uint(id))
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error":   "Token not found",
+		})
+	}
+
+	// Test connection
+	err = queue.TestConnection(token)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "RabbitMQ connection test successful",
+	})
+}
+
+// TestRabbitMQPublish handles POST /api/v1/admin/tokens/:id/test-publish
+func TestRabbitMQPublish(c fiber.Ctx) error {
+	id := fiber.Params[int](c, "id")
+	if id <= 0 {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid token ID",
+		})
+	}
+
+	db := database.GetDB()
+	tokenQuery := &queries.APITokenQuery{DB: db}
+
+	// Get token from database
+	token, err := tokenQuery.GetByID(uint(id))
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error":   "Token not found",
+		})
+	}
+
+	// Test publish
+	err = queue.TestPublish(token)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "RabbitMQ publish test successful",
 	})
 }
