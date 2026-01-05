@@ -143,6 +143,8 @@ func UpdateToken(c fiber.Ctx) error {
 	if req.RabbitMQPassword != "" {
 		existingToken.RabbitMQPassword = req.RabbitMQPassword
 	}
+	// VHost can be empty (defaults to "/"), always update if provided
+	existingToken.RabbitMQVHost = req.RabbitMQVHost
 	if req.RabbitMQQueue != "" {
 		existingToken.RabbitMQQueue = req.RabbitMQQueue
 	}

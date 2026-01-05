@@ -142,6 +142,12 @@
                            class="w-full px-3 py-2 border border-gray-300 rounded-md">
                 </div>
                 <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">RabbitMQ VHost</label>
+                    <input type="text" id="rabbitmqVHostInput" name="rabbitmq_vhost" placeholder="/"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    <p class="mt-1 text-xs text-gray-500">Leave empty for default vhost (/). Example: /onjourney_prod</p>
+                </div>
+                <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-1">RabbitMQ Queue</label>
                     <input type="text" id="rabbitmqQueueInput" name="rabbitmq_queue" value="click_events"
                            class="w-full px-3 py-2 border border-gray-300 rounded-md">
@@ -263,6 +269,7 @@ function editToken(id) {
                 document.getElementById('rabbitmqPortInput').value = token.rabbitmq_port || 5672;
                 document.getElementById('rabbitmqUserInput').value = token.rabbitmq_user || '';
                 document.getElementById('rabbitmqPasswordInput').value = ''; // Don't show password
+                document.getElementById('rabbitmqVHostInput').value = token.rabbitmq_vhost || '';
                 document.getElementById('rabbitmqQueueInput').value = token.rabbitmq_queue || 'click_events';
             }
         });
