@@ -11,8 +11,10 @@ import (
 func SetupAPI(app *fiber.App) {
 	v1 := app.Group("/api/v1")
 	
-	// Link creation endpoint (requires API token)
+	// Link endpoints (requires API token)
 	links := v1.Group("/links", middleware.RequireAPIToken)
 	links.Post("/", controllers.CreateShortLink)
+	links.Put("/", controllers.UpdateLinkByURL)
+	links.Delete("/", controllers.DeleteLinkByURL)
 }
 

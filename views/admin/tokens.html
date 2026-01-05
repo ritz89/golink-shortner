@@ -8,7 +8,7 @@
     </div>
 
     <!-- Documentation Section -->
-    <div class="bg-blue-50 border border-blue-200 rounded-lg p-6">
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 space-y-6">
         <div class="flex items-start">
             <div class="flex-shrink-0">
                 <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
@@ -16,21 +16,63 @@
                 </svg>
             </div>
             <div class="ml-3 flex-1">
-                <h3 class="text-sm font-medium text-blue-800 mb-2">How to Use API Token</h3>
-                <div class="text-sm text-blue-700 space-y-2">
-                    <p>To create a short link using the API, include your token in the <code class="bg-blue-100 px-1 py-0.5 rounded">X-API-Token</code> header:</p>
-                    <div class="bg-gray-900 text-gray-100 p-4 rounded-md font-mono text-xs overflow-x-auto">
-                        <div>curl -X POST {{.BaseURL}}/api/v1/links \</div>
-                        <div class="pl-4">-H "Content-Type: application/json" \</div>
-                        <div class="pl-4">-H "X-API-Token: YOUR_TOKEN_HERE" \</div>
-                        <div class="pl-4">-d '{"original_url": "https://example.com"}'</div>
+                <h3 class="text-sm font-medium text-blue-800 mb-4">API Documentation</h3>
+                <div class="text-sm text-blue-700 space-y-4">
+                    <p class="font-semibold">All API requests require the <code class="bg-blue-100 px-1 py-0.5 rounded">X-API-Token</code> header with your token.</p>
+                    
+                    <!-- Create Link -->
+                    <div>
+                        <h4 class="font-medium text-blue-900 mb-2">1. Create Short Link (POST)</h4>
+                        <p class="mb-2">Create a new short link. Custom code is optional and will be auto-generated if not provided.</p>
+                        <div class="bg-gray-900 text-gray-100 p-4 rounded-md font-mono text-xs overflow-x-auto">
+                            <div>curl -X POST {{.BaseURL}}/api/v1/links \</div>
+                            <div class="pl-4">-H "Content-Type: application/json" \</div>
+                            <div class="pl-4">-H "X-API-Token: YOUR_TOKEN_HERE" \</div>
+                            <div class="pl-4">-d '{"original_url": "https://example.com"}'</div>
+                        </div>
+                        <p class="mt-2 text-xs">With custom code (spaces will be replaced with hyphens, supports `-` and `_`):</p>
+                        <div class="bg-gray-900 text-gray-100 p-4 rounded-md font-mono text-xs overflow-x-auto">
+                            <div>curl -X POST {{.BaseURL}}/api/v1/links \</div>
+                            <div class="pl-4">-H "Content-Type: application/json" \</div>
+                            <div class="pl-4">-H "X-API-Token: YOUR_TOKEN_HERE" \</div>
+                            <div class="pl-4">-d '{"original_url": "https://example.com", "code": "my-custom-code"}'</div>
+                        </div>
                     </div>
-                    <p class="mt-2">Or with optional custom code:</p>
-                    <div class="bg-gray-900 text-gray-100 p-4 rounded-md font-mono text-xs overflow-x-auto">
-                        <div>curl -X POST {{.BaseURL}}/api/v1/links \</div>
-                        <div class="pl-4">-H "Content-Type: application/json" \</div>
-                        <div class="pl-4">-H "X-API-Token: YOUR_TOKEN_HERE" \</div>
-                        <div class="pl-4">-d '{"original_url": "https://example.com", "code": "mycode"}'</div>
+
+                    <!-- Update Link -->
+                    <div>
+                        <h4 class="font-medium text-blue-900 mb-2">2. Update Link Code (PUT)</h4>
+                        <p class="mb-2">Update the short code for an existing link. Only links created by your API token can be updated.</p>
+                        <div class="bg-gray-900 text-gray-100 p-4 rounded-md font-mono text-xs overflow-x-auto">
+                            <div>curl -X PUT {{.BaseURL}}/api/v1/links \</div>
+                            <div class="pl-4">-H "Content-Type: application/json" \</div>
+                            <div class="pl-4">-H "X-API-Token: YOUR_TOKEN_HERE" \</div>
+                            <div class="pl-4">-d '{"original_url": "https://example.com", "code": "new-code"}'</div>
+                        </div>
+                        <p class="mt-2 text-xs text-blue-600">Note: Code must be unique. Spaces in code will be automatically replaced with hyphens.</p>
+                    </div>
+
+                    <!-- Delete Link -->
+                    <div>
+                        <h4 class="font-medium text-blue-900 mb-2">3. Delete Link (DELETE)</h4>
+                        <p class="mb-2">Delete a link by its original URL. Only links created by your API token can be deleted.</p>
+                        <div class="bg-gray-900 text-gray-100 p-4 rounded-md font-mono text-xs overflow-x-auto">
+                            <div>curl -X DELETE {{.BaseURL}}/api/v1/links \</div>
+                            <div class="pl-4">-H "Content-Type: application/json" \</div>
+                            <div class="pl-4">-H "X-API-Token: YOUR_TOKEN_HERE" \</div>
+                            <div class="pl-4">-d '{"original_url": "https://example.com"}'</div>
+                        </div>
+                    </div>
+
+                    <!-- Code Format Rules -->
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-md p-3 mt-4">
+                        <h4 class="font-medium text-yellow-900 mb-2 text-xs">Code Format Rules:</h4>
+                        <ul class="text-xs text-yellow-800 space-y-1 list-disc list-inside">
+                            <li>Length: 4-20 characters</li>
+                            <li>Allowed characters: letters, numbers, hyphens (`-`), and underscores (`_`)</li>
+                            <li>Spaces are automatically replaced with hyphens</li>
+                            <li>Code must be unique across all links</li>
+                        </ul>
                     </div>
                 </div>
             </div>

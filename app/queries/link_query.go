@@ -67,3 +67,18 @@ func (q *LinkQuery) Exists(code string) (bool, error) {
 	}
 	return count > 0, nil
 }
+
+// GetByOriginalURLAndTokenID retrieves a link by original URL and API token ID
+func (q *LinkQuery) GetByOriginalURLAndTokenID(originalURL string, tokenID uint) (*models.Link, error) {
+	var link models.Link
+	err := q.DB.Where("original_url = ? AND api_token_id = ?", originalURL, tokenID).First(&link).Error
+	if err != nil {
+		return nil, err
+	}
+	return &link, nil
+}
+
+// DeleteByOriginalURLAndTokenID soft deletes a link by original URL and API token ID
+func (q *LinkQuery) DeleteByOriginalURLAndTokenID(originalURL string, tokenID uint) error {
+	return q.DB.Where("original_url = ? AND api_token_id = ?", originalURL, tokenID).Delete(&models.Link{}).Error
+}

@@ -8,10 +8,10 @@ import (
 )
 
 const (
-	base62Chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	base62Chars   = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	defaultLength = 8
-	minLength = 4
-	maxLength = 20
+	minLength     = 4
+	maxLength     = 20
 )
 
 // GenerateShortCode generates a random base62 code
@@ -27,10 +27,10 @@ func GenerateShortCodeWithLength(length int) string {
 	if length > maxLength {
 		length = maxLength
 	}
-	
+
 	var result strings.Builder
 	result.Grow(length)
-	
+
 	for i := 0; i < length; i++ {
 		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(base62Chars))))
 		if err != nil {
@@ -39,18 +39,23 @@ func GenerateShortCodeWithLength(length int) string {
 		}
 		result.WriteByte(base62Chars[num.Int64()])
 	}
-	
+
 	return result.String()
 }
 
+// NormalizeCode normalizes a code by replacing spaces with hyphens
+func NormalizeCode(code string) string {
+	return strings.ReplaceAll(code, " ", "-")
+}
+
 // ValidateCode validates if a code matches the required format
+// Allows alphanumeric characters, hyphens, and underscores
 func ValidateCode(code string) bool {
 	if len(code) < minLength || len(code) > maxLength {
 		return false
 	}
-	
-	// Only alphanumeric characters allowed
-	matched, _ := regexp.MatchString("^[a-zA-Z0-9]+$", code)
+
+	// Alphanumeric, hyphens, and underscores allowed
+	matched, _ := regexp.MatchString("^[a-zA-Z0-9_-]+$", code)
 	return matched
 }
-

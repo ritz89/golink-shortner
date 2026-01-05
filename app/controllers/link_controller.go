@@ -24,6 +24,17 @@ type CreateShortLinkRequest struct {
 	Code        string `json:"code,omitempty" validate:"omitempty,min=4,max=20"`
 }
 
+// APIUpdateLinkRequest request struct for updating link via API
+type APIUpdateLinkRequest struct {
+	OriginalURL string `json:"original_url" validate:"required"`
+	Code        string `json:"code" validate:"required,min=4,max=20"`
+}
+
+// APIDeleteLinkRequest request struct for deleting link via API
+type APIDeleteLinkRequest struct {
+	OriginalURL string `json:"original_url" validate:"required"`
+}
+
 // CreateShortLink handles POST /api/v1/links
 func CreateShortLink(c fiber.Ctx) error {
 	var req CreateShortLinkRequest
@@ -58,6 +69,9 @@ func CreateShortLink(c fiber.Ctx) error {
 			code = utils.GenerateShortCode()
 		}
 	} else {
+		// Normalize code (spaces -> hyphens)
+		code = utils.NormalizeCode(code)
+		
 		// Validate custom code
 		if !utils.ValidateCode(code) {
 			return c.Status(400).JSON(fiber.Map{
@@ -131,4 +145,103 @@ func Redirect(c fiber.Ctx) error {
 	}
 
 	return c.Redirect().To(link.OriginalURL)
+}
+
+// UpdateLinkByURL handles PUT /api/v1/links
+func UpdateLinkByURL(c fiber.Ctx) error {
+	var req APIUpdateLinkRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	apiToken := c.Locals("api_token").(*models.APIToken)
+	db := database.GetDB()
+	linkQuery := &queries.LinkQuery{DB: db}
+
+	// Normalize code (spaces -> hyphens)
+	normalizedCode := utils.NormalizeCode(req.Code)
+
+	// Validate code format
+	if !utils.ValidateCode(normalizedCode) {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid code format",
+		})
+	}
+
+	// Check if link exists for original URL and API token
+	link, err := linkQuery.GetByOriginalURLAndTokenID(req.OriginalURL, apiToken.ID)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Link not found",
+		})
+	}
+
+	// If code is different, check if new code already exists
+	oldCode := link.Code
+	if link.Code != normalizedCode {
+		exists, err := linkQuery.Exists(normalizedCode)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"error": "Failed to check code",
+			})
+		}
+		if exists {
+			return c.Status(409).JSON(fiber.Map{
+				"error": "Code already exists",
+			})
+		}
+	}
+
+	// Update code (use old code to find record, then update with new code)
+	link.Code = normalizedCode
+	if err := linkQuery.Update(oldCode, link); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to update link",
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"code":         link.Code,
+			"original_url": link.OriginalURL,
+			"short_url":    c.BaseURL() + "/" + link.Code,
+		},
+	})
+}
+
+// DeleteLinkByURL handles DELETE /api/v1/links
+func DeleteLinkByURL(c fiber.Ctx) error {
+	var req APIDeleteLinkRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	apiToken := c.Locals("api_token").(*models.APIToken)
+	db := database.GetDB()
+	linkQuery := &queries.LinkQuery{DB: db}
+
+	// Check if link exists for original URL and API token
+	_, err := linkQuery.GetByOriginalURLAndTokenID(req.OriginalURL, apiToken.ID)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Link not found",
+		})
+	}
+
+	// Soft delete link
+	if err := linkQuery.DeleteByOriginalURLAndTokenID(req.OriginalURL, apiToken.ID); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to delete link",
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": "Link deleted successfully",
+	})
 }
