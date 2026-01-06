@@ -55,17 +55,22 @@ func buildAMQPURL(token *models.APIToken) string {
 	encodedUser := url.QueryEscape(token.RabbitMQUser)
 	encodedPassword := url.QueryEscape(token.RabbitMQPassword)
 
-	// For vhost in AMQP URL path, we need to URL encode the vhost
-	// Default vhost "/" stays as "/" or can be "%2F"
-	// Custom vhost "/onjourney_prod" becomes "%2Fonjourney_prod"
-	// We encode all slashes in the vhost path
+	// For vhost in AMQP URL path:
+	// - Leading "/" is the path separator and must NOT be encoded
+	// - Only the vhost name after "/" needs encoding if it contains special chars
+	// - For "/onjourney_prod", we keep "/" and encode "onjourney_prod" if needed
 	var encodedVHost string
 	if vhost == "/" {
-		// Default vhost - can use "/" or "%2F", using "/" is simpler
+		// Default vhost
 		encodedVHost = "/"
 	} else {
-		// Custom vhost - encode all slashes
-		encodedVHost = strings.ReplaceAll(vhost, "/", "%2F")
+		// Custom vhost: keep leading "/" as path separator
+		// Only encode the vhost name part (after the leading "/")
+		vhostName := strings.TrimPrefix(vhost, "/")
+		// URL encode the vhost name (spaces and special chars)
+		encodedVHostName := url.PathEscape(vhostName)
+		// Reconstruct with leading "/" + encoded name
+		encodedVHost = "/" + encodedVHostName
 	}
 
 	return fmt.Sprintf("amqp://%s:%s@%s:%d%s",
