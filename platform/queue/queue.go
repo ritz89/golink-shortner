@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,7 @@ func buildAMQPURL(token *models.APIToken) string {
 		port = 5672
 	}
 
+	// Normalize vhost - ensure it starts with /
 	vhost := token.RabbitMQVHost
 	if vhost == "" {
 		vhost = "/"
@@ -48,12 +50,30 @@ func buildAMQPURL(token *models.APIToken) string {
 		vhost = "/" + vhost
 	}
 
+	// URL encode user and password only if they contain special characters
+	// For most cases, we don't need to encode, but url.QueryEscape handles it safely
+	encodedUser := url.QueryEscape(token.RabbitMQUser)
+	encodedPassword := url.QueryEscape(token.RabbitMQPassword)
+
+	// For vhost in AMQP URL path, we need to URL encode the vhost
+	// Default vhost "/" stays as "/" or can be "%2F"
+	// Custom vhost "/onjourney_prod" becomes "%2Fonjourney_prod"
+	// We encode all slashes in the vhost path
+	var encodedVHost string
+	if vhost == "/" {
+		// Default vhost - can use "/" or "%2F", using "/" is simpler
+		encodedVHost = "/"
+	} else {
+		// Custom vhost - encode all slashes
+		encodedVHost = strings.ReplaceAll(vhost, "/", "%2F")
+	}
+
 	return fmt.Sprintf("amqp://%s:%s@%s:%d%s",
-		token.RabbitMQUser,
-		token.RabbitMQPassword,
+		encodedUser,
+		encodedPassword,
 		token.RabbitMQHost,
 		port,
-		vhost,
+		encodedVHost,
 	)
 }
 
@@ -90,9 +110,13 @@ func getOrCreateConnection(token *models.APIToken) (*amqp.Channel, error) {
 	// Build AMQP URL from token config
 	amqpURL := buildAMQPURL(token)
 
+	// Log connection attempt (without password for security)
+	log.Printf("Connecting to RabbitMQ: %s@%s:%d, vhost: %s",
+		token.RabbitMQUser, token.RabbitMQHost, token.RabbitMQPort, token.RabbitMQVHost)
+
 	conn, err := amqp.Dial(amqpURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+		return nil, fmt.Errorf("failed to connect to RabbitMQ (vhost: %s): %w", token.RabbitMQVHost, err)
 	}
 
 	channel, err := conn.Channel()
@@ -229,6 +253,10 @@ func TestConnection(token *models.APIToken) error {
 	// Build AMQP URL
 	amqpURL := buildAMQPURL(token)
 
+	// Log connection attempt for debugging
+	log.Printf("Testing RabbitMQ connection: %s@%s:%d, vhost: %s",
+		token.RabbitMQUser, token.RabbitMQHost, token.RabbitMQPort, token.RabbitMQVHost)
+
 	// Create connection (with timeout handled by context)
 	done := make(chan error, 1)
 	var conn *amqp.Connection
@@ -242,7 +270,7 @@ func TestConnection(token *models.APIToken) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+			return fmt.Errorf("failed to connect to RabbitMQ (vhost: %s): %w", token.RabbitMQVHost, err)
 		}
 	case <-time.After(10 * time.Second):
 		return fmt.Errorf("connection test timeout after 10 seconds")
@@ -285,6 +313,10 @@ func TestPublish(token *models.APIToken) error {
 	// Build AMQP URL
 	amqpURL := buildAMQPURL(token)
 
+	// Log connection attempt for debugging
+	log.Printf("Testing RabbitMQ publish: %s@%s:%d, vhost: %s",
+		token.RabbitMQUser, token.RabbitMQHost, token.RabbitMQPort, token.RabbitMQVHost)
+
 	// Create connection (with timeout handled by goroutine)
 	done := make(chan error, 1)
 	var conn *amqp.Connection
@@ -298,7 +330,7 @@ func TestPublish(token *models.APIToken) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+			return fmt.Errorf("failed to connect to RabbitMQ (vhost: %s): %w", token.RabbitMQVHost, err)
 		}
 	case <-time.After(10 * time.Second):
 		return fmt.Errorf("connection test timeout after 10 seconds")
