@@ -56,20 +56,21 @@ func buildAMQPURL(token *models.APIToken) string {
 	encodedPassword := url.QueryEscape(token.RabbitMQPassword)
 
 	// For vhost in AMQP URL path:
-	// - Leading "/" is the path separator and must NOT be encoded
-	// - Only the vhost name after "/" needs encoding if it contains special chars
-	// - For "/onjourney_prod", we keep "/" and encode "onjourney_prod" if needed
+	// - Default vhost "/" uses "/" in URL
+	// - Custom vhost "/onjourney_prod" uses "/onjourney_prod" in URL (vhost name without leading slash)
+	//   OR uses "%2Fonjourney_prod" (encoded leading slash + vhost name)
+	// Based on RabbitMQ docs, custom vhost should be: /vhostname (path separator + vhost name)
 	var encodedVHost string
 	if vhost == "/" {
 		// Default vhost
 		encodedVHost = "/"
 	} else {
-		// Custom vhost: keep leading "/" as path separator
-		// Only encode the vhost name part (after the leading "/")
+		// Custom vhost: use vhost name without leading slash in URL path
+		// Format: /vhostname (not /%2Fvhostname)
+		// Example: /onjourney_prod becomes /onjourney_prod
 		vhostName := strings.TrimPrefix(vhost, "/")
-		// URL encode the vhost name (spaces and special chars)
+		// URL encode only if vhost name contains special characters
 		encodedVHostName := url.PathEscape(vhostName)
-		// Reconstruct with leading "/" + encoded name
 		encodedVHost = "/" + encodedVHostName
 	}
 
@@ -112,14 +113,39 @@ func getOrCreateConnection(token *models.APIToken) (*amqp.Channel, error) {
 		return conn.channel, nil
 	}
 
-	// Build AMQP URL from token config
-	amqpURL := buildAMQPURL(token)
+	// Build AMQP URL from token config (without vhost in URL for custom vhosts)
+	// We'll use DialConfig to set vhost explicitly
+	port := token.RabbitMQPort
+	if port == 0 {
+		port = 5672
+	}
 
-	// Log connection attempt (without password for security)
+	// Build base URL without vhost
+	encodedUser := url.QueryEscape(token.RabbitMQUser)
+	encodedPassword := url.QueryEscape(token.RabbitMQPassword)
+	baseURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
+		encodedUser,
+		encodedPassword,
+		token.RabbitMQHost,
+		port,
+	)
+
+	// Normalize vhost
+	vhost := token.RabbitMQVHost
+	if vhost == "" {
+		vhost = "/"
+	} else if !strings.HasPrefix(vhost, "/") {
+		vhost = "/" + vhost
+	}
+
+	// Log connection attempt
 	log.Printf("Connecting to RabbitMQ: %s@%s:%d, vhost: %s",
-		token.RabbitMQUser, token.RabbitMQHost, token.RabbitMQPort, token.RabbitMQVHost)
+		token.RabbitMQUser, token.RabbitMQHost, token.RabbitMQPort, vhost)
 
-	conn, err := amqp.Dial(amqpURL)
+	// Use DialConfig to set vhost explicitly
+	conn, err := amqp.DialConfig(baseURL, amqp.Config{
+		Vhost: vhost,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to RabbitMQ (vhost: %s): %w", token.RabbitMQVHost, err)
 	}
@@ -255,12 +281,32 @@ func TestConnection(token *models.APIToken) error {
 		return fmt.Errorf("RabbitMQ user not configured")
 	}
 
-	// Build AMQP URL
-	amqpURL := buildAMQPURL(token)
+	// Build base URL and set vhost explicitly
+	port := token.RabbitMQPort
+	if port == 0 {
+		port = 5672
+	}
 
-	// Log connection attempt for debugging
+	encodedUser := url.QueryEscape(token.RabbitMQUser)
+	encodedPassword := url.QueryEscape(token.RabbitMQPassword)
+	baseURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
+		encodedUser,
+		encodedPassword,
+		token.RabbitMQHost,
+		port,
+	)
+
+	// Normalize vhost
+	vhost := token.RabbitMQVHost
+	if vhost == "" {
+		vhost = "/"
+	} else if !strings.HasPrefix(vhost, "/") {
+		vhost = "/" + vhost
+	}
+
+	// Log connection attempt
 	log.Printf("Testing RabbitMQ connection: %s@%s:%d, vhost: %s",
-		token.RabbitMQUser, token.RabbitMQHost, token.RabbitMQPort, token.RabbitMQVHost)
+		token.RabbitMQUser, token.RabbitMQHost, token.RabbitMQPort, vhost)
 
 	// Create connection (with timeout handled by context)
 	done := make(chan error, 1)
@@ -268,7 +314,9 @@ func TestConnection(token *models.APIToken) error {
 	var err error
 
 	go func() {
-		conn, err = amqp.Dial(amqpURL)
+		conn, err = amqp.DialConfig(baseURL, amqp.Config{
+			Vhost: vhost,
+		})
 		done <- err
 	}()
 
@@ -315,12 +363,32 @@ func TestPublish(token *models.APIToken) error {
 		return fmt.Errorf("RabbitMQ user not configured")
 	}
 
-	// Build AMQP URL
-	amqpURL := buildAMQPURL(token)
+	// Build base URL and set vhost explicitly
+	port := token.RabbitMQPort
+	if port == 0 {
+		port = 5672
+	}
 
-	// Log connection attempt for debugging
+	encodedUser := url.QueryEscape(token.RabbitMQUser)
+	encodedPassword := url.QueryEscape(token.RabbitMQPassword)
+	baseURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
+		encodedUser,
+		encodedPassword,
+		token.RabbitMQHost,
+		port,
+	)
+
+	// Normalize vhost
+	vhost := token.RabbitMQVHost
+	if vhost == "" {
+		vhost = "/"
+	} else if !strings.HasPrefix(vhost, "/") {
+		vhost = "/" + vhost
+	}
+
+	// Log connection attempt
 	log.Printf("Testing RabbitMQ publish: %s@%s:%d, vhost: %s",
-		token.RabbitMQUser, token.RabbitMQHost, token.RabbitMQPort, token.RabbitMQVHost)
+		token.RabbitMQUser, token.RabbitMQHost, token.RabbitMQPort, vhost)
 
 	// Create connection (with timeout handled by goroutine)
 	done := make(chan error, 1)
@@ -328,7 +396,9 @@ func TestPublish(token *models.APIToken) error {
 	var err error
 
 	go func() {
-		conn, err = amqp.Dial(amqpURL)
+		conn, err = amqp.DialConfig(baseURL, amqp.Config{
+			Vhost: vhost,
+		})
 		done <- err
 	}()
 
