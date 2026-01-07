@@ -173,8 +173,8 @@ func PublishClickEvent(token *models.APIToken, code, originalURL, ip, userAgent 
 
 	// Get rate limit seconds (default 60 if not set)
 	rateLimitSeconds := token.RateLimitSeconds
-	if rateLimitSeconds <= 0 {
-		rateLimitSeconds = 60
+	if rateLimitSeconds < 0 {
+		rateLimitSeconds = 0
 	}
 
 	// Check if publish is allowed
