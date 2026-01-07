@@ -168,23 +168,26 @@ func getOrCreateConnection(token *models.APIToken) (*amqp.Channel, error) {
 
 // PublishClickEvent publishes a click event to RabbitMQ with rate limiting
 func PublishClickEvent(token *models.APIToken, code, originalURL, ip, userAgent string, rateLimiter *ratelimiter.RateLimiter) {
-	// Generate session key
-	sessionKey := ratelimiter.GetSessionKey(ip, userAgent)
-
-	// Get rate limit seconds (default 60 if not set)
+	// Get rate limit seconds (normalize negative values to 0)
 	rateLimitSeconds := token.RateLimitSeconds
 	if rateLimitSeconds < 0 {
 		rateLimitSeconds = 0
 	}
 
-	// Check if publish is allowed
-	if !rateLimiter.ShouldAllowPublish(sessionKey, rateLimitSeconds) {
-		// Silent fail - rate limited, don't publish
-		return
-	}
+	// Generate session key only if rate limiting is enabled and rate limiter is available
+	if rateLimitSeconds > 0 && rateLimiter != nil {
+		sessionKey := ratelimiter.GetSessionKey(ip, userAgent)
 
-	// Record publish time
-	rateLimiter.RecordPublish(sessionKey)
+		// Check if publish is allowed
+		if !rateLimiter.ShouldAllowPublish(sessionKey, rateLimitSeconds) {
+			// Silent fail - rate limited, don't publish
+			log.Printf("Click event rate limited (code: %s, rateLimit: %d)", code, rateLimitSeconds)
+			return
+		}
+
+		// Record publish time
+		rateLimiter.RecordPublish(sessionKey)
+	}
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -246,7 +249,9 @@ func PublishClickEvent(token *models.APIToken, code, originalURL, ip, userAgent 
 	)
 
 	if err != nil {
-		log.Printf("Failed to publish message: %v", err)
+		log.Printf("Failed to publish click event to RabbitMQ (code: %s, queue: %s): %v", code, queueName, err)
+	} else {
+		log.Printf("Successfully published click event to RabbitMQ (code: %s, queue: %s)", code, queueName)
 	}
 }
 

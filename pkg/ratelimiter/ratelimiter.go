@@ -29,18 +29,23 @@ func GetSessionKey(ip, userAgent string) string {
 
 // ShouldAllowPublish checks if publishing is allowed for the given session
 func (rl *RateLimiter) ShouldAllowPublish(sessionKey string, rateLimitSeconds int) bool {
+	// If rate limit is 0 or negative, allow all publishes
+	if rateLimitSeconds <= 0 {
+		return true
+	}
+
 	now := time.Now().Unix()
-	
+
 	value, exists := rl.store.Load(sessionKey)
 	if !exists {
 		return true
 	}
-	
+
 	lastPublishTime, ok := value.(int64)
 	if !ok {
 		return true
 	}
-	
+
 	elapsed := now - lastPublishTime
 	return elapsed >= int64(rateLimitSeconds)
 }
@@ -55,7 +60,7 @@ func (rl *RateLimiter) RecordPublish(sessionKey string) {
 func (rl *RateLimiter) cleanup() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		now := time.Now().Unix()
 		rl.store.Range(func(key, value interface{}) bool {
@@ -64,7 +69,7 @@ func (rl *RateLimiter) cleanup() {
 				rl.store.Delete(key)
 				return true
 			}
-			
+
 			// Delete entries older than 24 hours
 			if now-lastPublishTime > 86400 {
 				rl.store.Delete(key)
@@ -73,4 +78,3 @@ func (rl *RateLimiter) cleanup() {
 		})
 	}
 }
-

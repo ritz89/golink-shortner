@@ -7,6 +7,7 @@ import (
 	"boilerplate/pkg/utils"
 	"boilerplate/platform/database"
 	"boilerplate/platform/queue"
+	"log"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -71,7 +72,7 @@ func CreateShortLink(c fiber.Ctx) error {
 	} else {
 		// Normalize code (spaces -> hyphens)
 		code = utils.NormalizeCode(code)
-		
+
 		// Validate custom code
 		if !utils.ValidateCode(code) {
 			return c.Status(400).JSON(fiber.Map{
@@ -95,10 +96,10 @@ func CreateShortLink(c fiber.Ctx) error {
 
 	// Create link (from API, so IsAPIGenerated = true)
 	link := &models.Link{
-		Code:            code,
-		OriginalURL:     req.OriginalURL,
-		IsAPIGenerated:  true,
-		APITokenID:      &apiToken.ID,
+		Code:           code,
+		OriginalURL:    req.OriginalURL,
+		IsAPIGenerated: true,
+		APITokenID:     &apiToken.ID,
 	}
 
 	if err := linkQuery.Create(link); err != nil {
@@ -140,8 +141,18 @@ func Redirect(c fiber.Ctx) error {
 
 		// Publish click event asynchronously with rate limiting
 		go func() {
+			if globalRateLimiter == nil {
+				log.Printf("WARNING: globalRateLimiter is nil for code: %s", codeCopy)
+			}
 			queue.PublishClickEvent(apiTokenCopy, codeCopy, originalURL, ip, userAgent, globalRateLimiter)
 		}()
+	} else {
+		// Log why publish is skipped
+		if !link.IsAPIGenerated {
+			log.Printf("Skipping RabbitMQ publish for code %s: link is not API generated", code)
+		} else if link.APIToken == nil {
+			log.Printf("Skipping RabbitMQ publish for code %s: APIToken is nil", code)
+		}
 	}
 
 	return c.Redirect().To(link.OriginalURL)
