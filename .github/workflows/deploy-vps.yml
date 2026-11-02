@@ -101,7 +101,7 @@ jobs:
              -f "pipeline/deploy/vps/Dockerfile.$TARGET_ENV" \
             -t "onjourney-ci/golink:$SOURCE_SHA" "$RUNNER_TEMP/context"
           docker save "onjourney-ci/golink:$SOURCE_SHA" | gzip -1 > "$RUNNER_TEMP/release.tar.gz"
-          image_id=$(docker image inspect "onjourney-ci/golink:$SOURCE_SHA" --format '{{.Id}}')
+          image_id=$(python3 pipeline/deploy/vps/archive-identity.py "$RUNNER_TEMP/release.tar.gz")
           archive_sha=$(sha256sum "$RUNNER_TEMP/release.tar.gz" | cut -d' ' -f1)
           archive_size=$(stat -c %s "$RUNNER_TEMP/release.tar.gz")
           ssh -F "$RUNNER_TEMP/vps-ssh/config" vps-target "deploy $SOURCE_SHA ${image_id#sha256:} $archive_sha $archive_size compatible" < "$RUNNER_TEMP/release.tar.gz"
