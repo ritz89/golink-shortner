@@ -36,7 +36,7 @@ def export(repo,dest,app=None):
  with tarfile.open(fileobj=io.BytesIO(archive)) as source:
   for m in source:
    p=PurePosixPath(m.name);lower=m.name.lower()
-   if not m.isfile() or p.is_absolute() or '..' in p.parts:continue
+   if not m.isfile() or p.is_absolute() or '..' in p.parts or m.name=='.dockerignore':continue
    if any(x in {'.git','.github','node_modules','venv','.venv','__pycache__','backups','keys','uploads','media','staticfiles'} or x.startswith('.env') for x in p.parts):continue
    if p.suffix.lower() in {'.pem','.key','.p12','.pfx','.jks','.sql','.dump','.gz','.zip','.pdf','.sqlite3','.sqlite','.db'}:continue
    if p.suffix.lower() in {'.json','.yaml','.yml','.txt'} and any(x in lower for x in ['firebase','credentials','service-account','secret']):continue
