@@ -1,0 +1,20 @@
+FROM golang:1.25.7-alpine AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN grep -q ONJOURNEY_SKIP_AUTO_MIGRATE platform/database/database.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /out/golink app.go
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates tzdata
+WORKDIR /app
+COPY --from=builder /out/golink /app/golink
+COPY static ./static
+COPY views ./views
+COPY docs/swagger.yaml ./docs/swagger.yaml
+USER nobody:nobody
+EXPOSE 3000
+ENTRYPOINT ["/app/golink"]
+CMD ["-prod"]
+
+LABEL id.onjourney.schema-policy="external"

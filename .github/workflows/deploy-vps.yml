@@ -1,0 +1,113 @@
+name: VPS Release
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Isolated target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+        required: true
+      action:
+        description: Preflight does not change running services
+        type: choice
+        options: [preflight, deploy, rollback]
+        default: preflight
+        required: true
+      source_sha:
+        description: Full 40-character approved source commit; required for deploy
+        type: string
+        required: false
+      schema_compatible:
+        description: Required for deploy/rollback; migrations are never reversed automatically
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: vps-golink-${{ inputs.environment }}
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: vps-${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pipeline
+          persist-credentials: false
+      - name: Validate request
+        env:
+          ACTION: ${{ inputs.action }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          COMPATIBLE: ${{ inputs.schema_compatible }}
+        run: |
+          set -euo pipefail
+          if [ "$ACTION" != preflight ]; then
+            test "$COMPATIBLE" = true
+          fi
+          if [ "$ACTION" = deploy ]; then
+            [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          fi
+      - uses: actions/checkout@v4
+        if: inputs.action == 'deploy'
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: source
+          persist-credentials: false
+      - name: Require successful CI for exact source revision
+        if: inputs.action == 'deploy'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED_WORKFLOWS: ${{ vars.VPS_REQUIRED_WORKFLOWS }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: python3 pipeline/deploy/vps/verify-ci.py "${{ github.repository }}" "$SOURCE_SHA"
+      - name: Configure restricted SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          DEPLOY_HOST: ${{ vars.VPS_HOST }}
+          DEPLOY_USER: ${{ vars.VPS_USER }}
+          PINNED_HOST: ${{ vars.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$DEPLOY_KEY" && test -n "$PINNED_HOST"
+          [[ "$DEPLOY_HOST" =~ ^[0-9.]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^ojci-[a-z]+$ ]]
+          mkdir -p "$RUNNER_TEMP/vps-ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/vps-ssh/key"
+          printf '%s\n' "$PINNED_HOST" > "$RUNNER_TEMP/vps-ssh/known_hosts"
+          printf '%s\n' "Host vps-target" "  HostName $DEPLOY_HOST" "  User $DEPLOY_USER" "  IdentityFile $RUNNER_TEMP/vps-ssh/key" "  UserKnownHostsFile $RUNNER_TEMP/vps-ssh/known_hosts" "  StrictHostKeyChecking yes" "  IdentitiesOnly yes" "  BatchMode yes" "  ConnectTimeout 15" "  ServerAliveInterval 30" "  ServerAliveCountMax 10" > "$RUNNER_TEMP/vps-ssh/config"
+      - name: Read-only server preflight
+        if: inputs.action != 'rollback'
+        run: ssh -F "$RUNNER_TEMP/vps-ssh/config" vps-target preflight
+      - name: Build sanitized immutable release image
+        if: inputs.action == 'deploy'
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 pipeline/deploy/vps/build-context.py source "$RUNNER_TEMP/context" --app golink
+          :
+          docker build --platform linux/amd64 --build-arg TARGETOS=linux --build-arg TARGETARCH=amd64 \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --label "id.onjourney.repository=ritz89/golink-shortner" \
+            --label "id.onjourney.environment=$TARGET_ENV" --label "id.onjourney.app=golink" \
+             -f "pipeline/deploy/vps/Dockerfile.$TARGET_ENV" \
+            -t "onjourney-ci/golink:$SOURCE_SHA" "$RUNNER_TEMP/context"
+          docker save "onjourney-ci/golink:$SOURCE_SHA" | gzip -1 > "$RUNNER_TEMP/release.tar.gz"
+          image_id=$(docker image inspect "onjourney-ci/golink:$SOURCE_SHA" --format '{{.Id}}')
+          archive_sha=$(sha256sum "$RUNNER_TEMP/release.tar.gz" | cut -d' ' -f1)
+          archive_size=$(stat -c %s "$RUNNER_TEMP/release.tar.gz")
+          ssh -F "$RUNNER_TEMP/vps-ssh/config" vps-target "deploy $SOURCE_SHA ${image_id#sha256:} $archive_sha $archive_size compatible" < "$RUNNER_TEMP/release.tar.gz"
+      - name: Roll back prior compatible application image
+        if: inputs.action == 'rollback'
+        run: ssh -F "$RUNNER_TEMP/vps-ssh/config" vps-target 'rollback compatible'
+      - name: Remove transient credentials and image archive
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/vps-ssh" "$RUNNER_TEMP/context" "$RUNNER_TEMP/frontend-build.env" "$RUNNER_TEMP/release.tar.gz"
